@@ -1,0 +1,94 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+@theme inline {
+  --animate-aurora: aurora 60s linear infinite;
+  @keyframes aurora {
+    from {
+      background-position: 50% 50%, 50% 50%;
+    }
+    to {
+      background-position: 350% 50%, 350% 50%;
+    }
+  }
+}
+
+:root {
+  --card: rgb(255, 255, 255);
+  --ring: rgb(26, 137, 23);
+  --input: rgb(218, 220, 224);
+  --muted: rgb(247, 244, 237);
+  --accent: rgb(26, 137, 23);
+  --border: rgb(36, 36, 36);
+  --radius: 0.5rem;
+  --popover: rgb(255, 255, 255);
+  --primary: rgb(26, 137, 23);
+  --font-mono: monospace;
+  --font-sans: 'Poppins', sohne, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --secondary: rgb(247, 244, 237);
+  --background: rgb(255, 255, 255);
+  --font-serif: gt-super, Georgia, Cambria, "Times New Roman", Times, serif;
+  --foreground: rgb(36, 36, 36);
+  --destructive: #ef4444;
+  --card-foreground: rgb(36, 36, 36);
+  --muted-foreground: rgb(107, 107, 107);
+  --accent-foreground: rgb(255, 255, 255);
+  --popover-foreground: rgb(36, 36, 36);
+  --primary-foreground: rgb(255, 255, 255);
+  --secondary-foreground: rgb(36, 36, 36);
+  --destructive-foreground: #ffffff;
+}
+
+.dark {
+  --card: rgb(25, 25, 25);
+  --ring: rgb(26, 137, 23);
+  --input: rgb(36, 36, 36);
+  --muted: rgb(0, 0, 0);
+  --accent: rgb(26, 137, 23);
+  --border: rgb(36, 36, 36);
+  --popover: rgb(25, 25, 25);
+  --primary: rgb(26, 137, 23);
+  --secondary: rgb(0, 0, 0);
+  --background: rgb(25, 25, 25);
+  --foreground: rgb(255, 255, 255);
+  --destructive: #ef4444;
+  --card-foreground: rgb(255, 255, 255);
+  --muted-foreground: rgb(107, 107, 107);
+  --accent-foreground: rgb(255, 255, 255);
+  --popover-foreground: rgb(255, 255, 255);
+  --primary-foreground: rgb(255, 255, 255);
+  --secondary-foreground: rgb(255, 255, 255);
+  --destructive-foreground: #ffffff;
+}
+
+@theme inline {
+  --color-card: var(--card);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-border: var(--border);
+  --color-radius: var(--radius);
+  --color-popover: var(--popover);
+  --color-primary: var(--primary);
+  --color-font-mono: var(--font-mono);
+  --color-font-sans: var(--font-sans);
+  --color-secondary: var(--secondary);
+  --color-background: var(--background);
+  --color-font-serif: var(--font-serif);
+  --color-foreground: var(--foreground);
+  --color-destructive: var(--destructive);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-destructive-foreground: var(--destructive-foreground);
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}

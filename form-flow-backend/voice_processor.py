@@ -1,0 +1,312 @@
+import openai
+import google.generativeai as genai
+from typing import Dict, List, Any, Optional
+import json
+import re
+from form_parser import format_email_input
+
+class VoiceProcessor:
+    def __init__(self, openai_key: str = None, gemini_key: str = None):
+        self.openai_client = None
+        if openai_key:
+            try:
+                self.openai_client = openai.OpenAI(api_key=openai_key)
+            except TypeError:
+                # Fallback if local httpx version is incompatible with the OpenAI SDK
+                self.openai_client = None
+        if gemini_key:
+            genai.configure(api_key=gemini_key)
+            self.gemini_model = genai.GenerativeModel("gemini-1.5-pro")
+        else:
+            self.gemini_model = None
+
+    def analyze_form_context(self, form_schema: List[Dict]) -> str:
+        """Analyze form structure and create context for intelligent prompts"""
+        context = "Form Analysis:\n"
+        for form in form_schema:
+            context += f"Form Action: {form.get('action', 'N/A')}\n"
+            context += "Fields:\n"
+            for field in form.get('fields', []):
+                field_type = field.get('type', 'text')
+                label = field.get('label', field.get('name', 'Unnamed'))
+                required = " (Required)" if field.get('required') else ""
+                context += f"- {label}: {field_type}{required}\n"
+                if field.get('options'):
+                    options = [opt.get('label', opt.get('value', '')) for opt in field['options']]
+                    context += f"  Options: {', '.join(options)}\n"
+        return context
+
+    def generate_smart_prompt(self, form_context: str, field_info: Dict) -> str:
+        """Generate context-aware prompts for form fields"""
+        field_name = field_info.get('label', field_info.get('name', 'field'))
+        field_type = field_info.get('type', 'text')
+        required = field_info.get('required', False)
+        
+        prompt_templates = {
+            'email': f"Please provide your email address for {field_name}",
+            'password': f"Please speak your password for {field_name}",
+            'tel': f"Please provide your phone number for {field_name}",
+            'date': f"Please provide the date for {field_name} (you can say it naturally like 'January 15th 2024')",
+            'select': f"Please choose from the available options for {field_name}",
+            'textarea': f"Please provide your response for {field_name}. You can speak as much as needed",
+            'checkbox': f"Say 'yes' to check or 'no' to uncheck {field_name}",
+            'text': f"Please provide {field_name}"
+        }
+        
+        base_prompt = prompt_templates.get(field_type, f"Please provide {field_name}")
+        if required:
+            base_prompt += " (This field is required)"
+            
+        return base_prompt
+
+    def process_voice_input(self, transcript: str, field_info: Dict, form_context: str) -> Dict:
+        """Process voice input using LLM to improve clarity and accuracy"""
+        if not self.gemini_model:
+            processed_text = self._format_field_input(transcript, field_info)
+            return {"processed_text": processed_text, "confidence": 0.5, "suggestions": []}
+
+        field_type = field_info.get('type', 'text')
+        field_name = field_info.get('label', field_info.get('name', 'field'))
+        is_email = field_info.get('is_email', False) or field_type == 'email'
+        is_checkbox = field_info.get('is_checkbox', False) or field_type == 'checkbox'
+        
+        special_instructions = ""
+        if is_email:
+            special_instructions = """
+        SPECIAL EMAIL FORMATTING RULES (ENHANCED FOR GMAIL):
+        - Convert 'at', 'add', 'ampersand' to '@'
+        - Convert 'dot', 'period', 'point' to '.'
+        - Convert 'underscore' or 'under score' to '_'
+        - Convert 'dash', 'hyphen', 'minus' to '-'
+        - Remove all spaces
+        - Make everything lowercase
+        - Handle common email providers: 'gmail' -> 'gmail.com', 'yahoo' -> 'yahoo.com', etc.
+        - If user says just 'gmail' without '.com', automatically add '.com'
+        - Examples:
+          * 'john dot smith at gmail dot com' -> 'john.smith@gmail.com'
+          * 'jane underscore doe at gmail' -> 'jane_doe@gmail.com'
+          * 'test dash user at yahoo dot com' -> 'test-user@yahoo.com'
+          * 'myemail at gmail' -> 'myemail@gmail.com'
+        - Ensure proper email format: localpart@domain.tld
+        - If format is unclear, suggest the most likely interpretation
+        """
+        elif is_checkbox:
+            special_instructions = """
+        SPECIAL CHECKBOX FORMATTING RULES:
+        - Convert positive responses (yes, true, check, agree, etc.) to 'true'
+        - Convert negative responses (no, false, uncheck, disagree, etc.) to 'false'
+        - Default to 'false' if unclear
+        - Example: 'yes I agree' becomes 'true', 'no thanks' becomes 'false'
+        """
+        
+        prompt = f"""
+        Form Context: {form_context}
+        Current Field: {field_name} (Type: {field_type})
+        User Voice Input: "{transcript}"
+        {special_instructions}
+        
+        Task: Process and improve the voice input for this form field with HIGH ACCURACY.
+        
+        Requirements:
+        1. Clean up the transcript (fix obvious speech-to-text errors, especially for email addresses)
+        2. Format appropriately for the field type (CRITICAL for email fields)
+        3. For email fields: Ensure proper format (localpart@domain.tld), handle Gmail and other providers correctly
+        4. If unclear or incomplete, suggest clarifying questions
+        5. Provide confidence score (0-1) - be conservative if uncertain
+        6. For email fields, double-check that '@' and '.' are in correct positions
+        
+        IMPORTANT FOR EMAIL FIELDS:
+        - If the transcript contains email-like patterns, ensure proper formatting
+        - Common errors to fix: missing @, missing .com, wrong spacing
+        - If user says "gmail" without "dot com", assume they mean "gmail.com"
+        - Validate the email structure before returning
+        
+        Respond in JSON format:
+        {{
+            "processed_text": "cleaned and formatted text",
+            "confidence": 0.8,
+            "suggestions": ["suggestion1", "suggestion2"],
+            "clarifying_questions": ["question1", "question2"]
+        }}
+        """
+        
+        try:
+            response = self.gemini_model.generate_content(prompt)
+            result = json.loads(response.text)
+            # Apply additional formatting for special field types
+            if is_email:
+                result["processed_text"] = self._format_email_from_voice(result["processed_text"])
+            elif is_checkbox:
+                result["processed_text"] = self._format_checkbox_from_voice(result["processed_text"])
+            return result
+        except Exception as e:
+            processed_text = self._format_field_input(transcript, field_info)
+            return {
+                "processed_text": processed_text,
+                "confidence": 0.3,
+                "suggestions": [f"Could you repeat that for {field_name}?"],
+                "clarifying_questions": [f"I didn't catch that clearly. Could you repeat {field_name}?"]
+            }
+
+    def handle_pause_suggestions(self, field_info: Dict, form_context: str) -> List[str]:
+        """Generate helpful suggestions when user pauses"""
+        field_type = field_info.get('type', 'text')
+        field_name = field_info.get('label', field_info.get('name', 'field'))
+        
+        suggestions = {
+            'email': [
+                f"For {field_name}, say it like 'john dot smith at gmail dot com'",
+                f"You can also say 'john underscore smith at gmail' and I'll format it correctly",
+                f"For Gmail addresses, you can just say 'username at gmail' and I'll add the '.com' automatically"
+            ],
+            'tel': [f"For {field_name}, you can say your phone number digit by digit or naturally"],
+            'date': [f"For {field_name}, you can say the date naturally like 'March 15th 2024'"],
+            'select': [f"For {field_name}, please choose one of the available options"],
+            'password': [f"For {field_name}, please speak your password clearly"],
+            'textarea': [f"For {field_name}, you can speak as much as you need. Take your time."],
+            'checkbox': [f"For {field_name}, say 'yes' to check it or 'no' to leave it unchecked"]
+        }
+        
+        return suggestions.get(field_type, [f"Please provide your {field_name}. Take your time."])
+
+    def validate_pronunciation(self, transcript: str, field_info: Dict) -> Dict:
+        """Validate and suggest corrections for pronunciation-sensitive fields"""
+        field_type = field_info.get('type', 'text')
+        field_name = field_info.get('label', field_info.get('name', 'field'))
+        
+        # For name fields, email addresses, etc.
+        is_email = field_info.get('is_email', False) or field_type == 'email'
+        if 'name' in field_name.lower() or is_email:
+            if not self.gemini_model:
+                return {"needs_confirmation": True, "suggestion": transcript}
+                
+            prompt = f"""
+            Field: {field_name}
+            User said: "{transcript}"
+            
+            Check if this looks correct for a {field_name} field.
+            If it seems like there might be pronunciation errors, suggest a correction.
+            For email fields, ensure proper format with @ and . symbols.
+            
+            Respond in JSON:
+            {{
+                "needs_confirmation": true/false,
+                "suggestion": "corrected version",
+                "confidence": 0.8
+            }}
+            """
+            
+            try:
+                response = self.gemini_model.generate_content(prompt)
+                result = json.loads(response.text)
+                if is_email:
+                    result["suggestion"] = self._format_email_from_voice(result["suggestion"])
+                return result
+            except:
+                suggestion = self._format_field_input(transcript, field_info)
+                return {"needs_confirmation": True, "suggestion": suggestion, "confidence": 0.5}
+        
+        return {"needs_confirmation": False, "suggestion": transcript, "confidence": 0.9}
+    
+    def _format_email_from_voice(self, text: str) -> str:
+        """Convert voice input to proper email format with enhanced Gmail support"""
+        if not text:
+            return text
+            
+        # Convert common voice patterns to email symbols
+        email_text = text.lower().strip()
+        
+        # Handle common email provider variations
+        # "gmail" -> "gmail.com" if not already present
+        email_text = re.sub(r'\bgmail\b(?!\.com)', 'gmail.com', email_text)
+        email_text = re.sub(r'\byahoo\b(?!\.com)', 'yahoo.com', email_text)
+        email_text = re.sub(r'\boutlook\b(?!\.com)', 'outlook.com', email_text)
+        email_text = re.sub(r'\bhotmail\b(?!\.com)', 'hotmail.com', email_text)
+        
+        # Convert "at" to "@" (handle variations)
+        email_text = re.sub(r'\b(at|add|ampersand)\b', '@', email_text, flags=re.IGNORECASE)
+        
+        # Convert "dot" to "." (handle variations)
+        email_text = re.sub(r'\b(dot|period|point|full stop)\b', '.', email_text, flags=re.IGNORECASE)
+        
+        # Handle "underscore" or "under score"
+        email_text = re.sub(r'\b(underscore|under score|under_score)\b', '_', email_text, flags=re.IGNORECASE)
+        
+        # Handle "dash" or "hyphen" or "minus"
+        email_text = re.sub(r'\b(dash|hyphen|minus)\b', '-', email_text, flags=re.IGNORECASE)
+        
+        # Remove "space" mentions
+        email_text = re.sub(r'\bspace\b', '', email_text, flags=re.IGNORECASE)
+        
+        # Remove all actual spaces
+        email_text = email_text.replace(' ', '')
+        
+        # Clean up multiple consecutive dots (except in domain)
+        email_text = re.sub(r'\.{2,}', '.', email_text)
+        
+        # Ensure @ symbol exists (if not, try to infer from structure)
+        if '@' not in email_text and '.' in email_text:
+            # Try to find where @ should be (usually before the last dot sequence)
+            parts = email_text.split('.')
+            if len(parts) >= 2:
+                # Common pattern: "john dot smith at gmail dot com"
+                # After processing becomes: "john.smithgmail.com"
+                # Try to fix: look for common domain patterns
+                common_domains = ['gmail', 'yahoo', 'outlook', 'hotmail', 'icloud', 'protonmail']
+                for domain in common_domains:
+                    if domain in email_text:
+                        # Replace domain with domain.com
+                        email_text = re.sub(rf'\b{domain}\b', f'{domain}.com', email_text)
+                        # Try to insert @ before domain
+                        domain_pos = email_text.find(domain)
+                        if domain_pos > 0:
+                            # Check if there's already a @ nearby
+                            before_domain = email_text[:domain_pos]
+                            if '@' not in before_domain:
+                                # Insert @ before the domain
+                                email_text = before_domain.rstrip('.') + '@' + email_text[domain_pos:]
+                        break
+        
+        # Final cleanup: ensure proper email format
+        # Remove any remaining spaces
+        email_text = email_text.replace(' ', '').strip()
+        
+        # Validate basic email structure
+        if '@' in email_text and '.' in email_text.split('@')[1]:
+            # Basic validation passed
+            return email_text
+        
+        # If still no @, return as-is (let LLM handle it)
+        return email_text
+    
+    def _format_checkbox_from_voice(self, text: str) -> str:
+        """Convert voice input to checkbox boolean value"""
+        if not text:
+            return "false"
+            
+        text_lower = text.lower().strip()
+        
+        # Positive responses
+        positive_words = ['yes', 'true', 'check', 'checked', 'tick', 'ticked', 'select', 'selected', 'agree', 'accept', 'on', 'enable', 'enabled']
+        # Negative responses  
+        negative_words = ['no', 'false', 'uncheck', 'unchecked', 'untick', 'unticked', 'deselect', 'deselected', 'disagree', 'decline', 'off', 'disable', 'disabled']
+        
+        if any(word in text_lower for word in positive_words):
+            return "true"
+        elif any(word in text_lower for word in negative_words):
+            return "false"
+        
+        # Default to false if unclear
+        return "false"
+    
+    def _format_field_input(self, text: str, field_info: Dict) -> str:
+        """Format input based on field type"""
+        field_type = field_info.get('type', 'text')
+        is_email = field_info.get('is_email', False) or field_type == 'email'
+        
+        if is_email:
+            return self._format_email_from_voice(text)
+        elif field_info.get('is_checkbox', False) or field_type == 'checkbox':
+            return self._format_checkbox_from_voice(text)
+        
+        return text
