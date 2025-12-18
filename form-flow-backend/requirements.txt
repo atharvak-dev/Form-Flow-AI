@@ -19,3 +19,4 @@ psutil
 py-cpuinfo
 seaborn>=0.11.0
 elevenlabs==1.6.1
+vosk>=0.3.45

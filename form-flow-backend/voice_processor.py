@@ -365,3 +365,112 @@ class VoiceProcessor:
             return self._format_checkbox_from_voice(text)
         
         return text
+    
+    def format_field_value(self, raw_value: str, field_info: Dict) -> str:
+        """
+        Basic cleanup only - NO form-specific formatting.
+        Form schema (form_conventions.py) handles all validation/formatting.
+        
+        This method only does minimal voice transcription cleanup.
+        """
+        # Only strip leading/trailing whitespace from voice input
+        return raw_value.strip()
+    
+    def _normalize_email(self, text: str) -> str:
+        """
+        Normalize email by fixing STT spacing errors and converting voice keywords.
+        
+        Assumes user spoke email correctly, but STT inserted spaces or converted
+        spoken punctuation to words.
+        
+        Example 1: " Atharv shashikant.karwal@gmail.com" 
+                → "atharv.shashikant.karwal@gmail.com"
+        Example 2: "Atharv dot shashikant at gmail dot com"
+                → "atharv.shashikant@gmail.com"
+        
+        Logic:
+        1. Strip leading/trailing spaces
+        2. Convert to lowercase
+        3. Replace voice keywords (dot → ., at → @, underscore → _)
+        4. Split at @ symbol
+        5. In local part (before @): replace spaces with dots
+        6. Preserve domain part exactly
+        7. Don't insert dot if space is immediately before/after @
+        """
+        email = text.strip().lower()
+        
+        # Convert voice keywords to punctuation
+        # "atharv dot shashikant at gmail dot com" → "atharv.shashikant@gmail.com"
+        email = email.replace(' dot ', '.')
+        email = email.replace(' at ', '@')
+        email = email.replace(' underscore ', '_')
+        email = email.replace(' dash ', '-')
+        
+        # Handle edge cases where dot/at are at the end
+        email = email.replace(' dot', '.')
+        email = email.replace(' at', '@')
+        email = email.replace(' underscore', '_')
+        
+        # Add common domain endings if missing
+        if '@' in email and '.' not in email.split('@')[1]:
+            # "user@gmail" → "user@gmail.com"
+            if email.endswith('gmail'):
+                email += '.com'
+            elif email.endswith('yahoo'):
+                email += '.com'
+            elif email.endswith('outlook'):
+                email += '.com'
+        
+        if '@' not in email:
+            # Not an email, return as-is
+            return email
+        
+        # Split into local and domain parts
+        parts = email.split('@', 1)
+        local_part = parts[0].strip()
+        domain_part = parts[1].strip() if len(parts) > 1 else ''
+        
+        # Replace remaining spaces with dots in local part
+        # "atharv shashikant.karwal" → "atharv.shashikant.karwal"
+        normalized_local = local_part.replace(' ', '.')
+        
+        # Remove consecutive dots (in case of multiple spaces)
+        while '..' in normalized_local:
+            normalized_local = normalized_local.replace('..', '.')
+        
+        # Remove leading/trailing dots
+        normalized_local = normalized_local.strip('.')
+        
+        return f"{normalized_local}@{domain_part}"
+    
+    def _strengthen_password(self, password: str, requirements: dict) -> str:
+        """
+        Add missing special characters if password doesn't meet requirements.
+        
+        Common form requirements:
+        - At least one special character
+        - At least one number
+        - At least one uppercase letter
+        """
+        # Check requirements (default to True if not specified)
+        needs_special = requirements.get('special_char', True)
+        needs_number = requirements.get('number', True)
+        needs_uppercase = requirements.get('uppercase', True)
+        
+        # Check what's missing
+        has_special = bool(re.search(r'[!@#$%^&*(),.?":{}|<>]', password))
+        has_number = bool(re.search(r'\d', password))
+        has_uppercase = bool(re.search(r'[A-Z]', password))
+        
+        # Add special character if missing and needed
+        if needs_special and not has_special:
+            # Intelligent replacement: replace space with @ or add @ at end
+            if ' ' in password:
+                password = password.replace(' ', '@', 1)  # Replace only first space
+            else:
+                password = password + '@'
+        
+        # Note: We don't auto-add numbers or uppercase as that changes the user's intended password too much
+        # The form validation will catch those if truly required
+        
+        return password

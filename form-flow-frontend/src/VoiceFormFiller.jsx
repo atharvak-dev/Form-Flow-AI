@@ -15,27 +15,38 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const [useDeepgram, setUseDeepgram] = useState(true); // Try Deepgram first
+  const [useDeepgram, setUseDeepgram] = useState(false); // Use browser STT (faster & more accurate)
 
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
-  const recognitionRef = useRef(null); // Fallback for browser STT
+  const recognitionRef = useRef(null); // Browser STT
   const pauseTimeoutRef = useRef(null);
   const audioRef = useRef(null);
   const streamRef = useRef(null);
 
   const allFields = formSchema.flatMap(form =>
-    form.fields.filter(field => !field.hidden && field.type !== 'submit')
+    form.fields.filter(field =>
+      !field.hidden &&
+      field.type !== 'submit' &&
+      // Skip confirm password in voice interaction (auto-filled from main password)
+      !(field.type === 'password' && (
+        field.name.toLowerCase().includes('confirm') ||
+        field.name.toLowerCase().includes('cpassword') ||
+        field.name.toLowerCase().includes('verify') ||
+        field.label?.toLowerCase().includes('confirm') ||
+        field.label?.toLowerCase().includes('verify')
+      ))
+    )
   );
 
   useEffect(() => {
-    // Initialize browser fallback STT
+    // Initialize browser STT (primary)
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       recognitionRef.current = new SpeechRecognition();
       recognitionRef.current.continuous = true;
       recognitionRef.current.interimResults = true;
-      recognitionRef.current.lang = 'en-US';
+      recognitionRef.current.lang = 'en-IN'; // Indian English for better name recognition
 
       recognitionRef.current.onresult = handleBrowserSpeechResult;
       recognitionRef.current.onend = handleBrowserSpeechEnd;
@@ -99,7 +110,7 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
     setIsListening(false);
   };
 
-  // Deepgram-based recording
+  // Batch-based recording and transcription
   const startListening = async () => {
     setTranscript('');
     setSuggestions([]);
@@ -124,7 +135,7 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
         };
 
         mediaRecorder.onstop = async () => {
-          // Send recorded audio to Deepgram
+          // Send recorded audio to backend for transcription
           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
           await transcribeWithDeepgram(audioBlob);
         };
@@ -132,10 +143,10 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
         mediaRecorder.start();
         setIsListening(true);
         setIsRecording(true);
-        console.log('🎤 Started Deepgram recording');
+        console.log('🎤 Started recording for transcription');
 
       } catch (error) {
-        console.error('Failed to start Deepgram recording:', error);
+        console.error('Failed to start recording:', error);
         // Fall back to browser STT
         setUseDeepgram(false);
         startBrowserListening();
@@ -247,6 +258,9 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
   const confirmFieldValue = (value) => {
     const currentField = allFields[currentFieldIndex];
 
+    // Update form data with current field
+    const newFormData = { ...formData, [currentField.name]: value };
+
     // Store password value for confirm password auto-fill
     const fieldName = (currentField.name || '').toLowerCase();
     const fieldLabel = (currentField.label || '').toLowerCase();
@@ -254,66 +268,42 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
       fieldName.includes('password') ||
       fieldLabel.includes('password');
 
-    // Store password if this is a password field (but not confirm password)
-    if (isPasswordField && !fieldName.includes('confirm') && !fieldLabel.includes('confirm')) {
+    // If this is a password field (but not confirm password), auto-fill confirm password
+    if (isPasswordField && !fieldName.includes('confirm') && !fieldLabel.includes('confirm') && !fieldName.includes('cpassword')) {
       window._lastPasswordValue = value;
+
+      // Find confirm password field in the FULL form schema (not just voice fields)
+      const confirmPasswordField = formSchema.flatMap(form => form.fields).find(f => {
+        const fname = (f.name || '').toLowerCase();
+        const flabel = (f.label || '').toLowerCase();
+        return (f.type === 'password' || fname.includes('password') || flabel.includes('password')) &&
+          (fname.includes('confirm') || fname.includes('cpassword') || fname.includes('verify') ||
+            flabel.includes('confirm') || flabel.includes('verify'));
+      });
+
+      if (confirmPasswordField) {
+        console.log(`🔐 Auto-filling confirm password field: ${confirmPasswordField.name}`);
+        newFormData[confirmPasswordField.name] = value;
+      }
     }
 
-    setFormData(prev => ({
-      ...prev,
-      [currentField.name]: value
-    }));
+    setFormData(newFormData);
 
-    moveToNextField();
+    // Pass updated data to moveToNextField
+    moveToNextField(newFormData);
   };
 
-  const moveToNextField = () => {
+  const moveToNextField = (currentFormData = formData) => {
     const nextIndex = currentFieldIndex + 1;
     if (nextIndex < allFields.length) {
-      const nextField = allFields[nextIndex];
-      const nextFieldName = (nextField.name || '').toLowerCase();
-      const nextFieldLabel = (nextField.label || '').toLowerCase();
-
-      // Check if next field is confirm password and we have a stored password
-      const isConfirmPassword =
-        (nextField.type === 'password' || nextFieldName.includes('password') || nextFieldLabel.includes('password')) &&
-        (nextFieldName.includes('confirm') || nextFieldLabel.includes('confirm') ||
-          nextFieldName.includes('repeat') || nextFieldLabel.includes('repeat') ||
-          nextFieldName.includes('retype') || nextFieldLabel.includes('retype'));
-
-      if (isConfirmPassword && window._lastPasswordValue) {
-        // Auto-fill confirm password with the stored password value
-        console.log('🔒 Auto-filling confirm password');
-        setFormData(prev => ({
-          ...prev,
-          [nextField.name]: window._lastPasswordValue
-        }));
-
-        // Skip to the field after confirm password
-        setCurrentFieldIndex(nextIndex + 1);
-        if (nextIndex + 1 < allFields.length) {
-          setCurrentPrompt(allFields[nextIndex + 1].smart_prompt || `Please provide ${allFields[nextIndex + 1].label || allFields[nextIndex + 1].name}`);
-          playFieldSpeech(allFields[nextIndex + 1]);
-        } else {
-          // Form complete
-          stopListening();
-          // Include the auto-filled confirm password in final data
-          const finalData = { ...formData, [nextField.name]: window._lastPasswordValue };
-          onComplete(finalData);
-        }
-        return;
-      }
-
       setCurrentFieldIndex(nextIndex);
       setCurrentPrompt(allFields[nextIndex].smart_prompt || `Please provide ${allFields[nextIndex].label || allFields[nextIndex].name}`);
       setTranscript('');
-      setNeedsConfirmation(false);
-      setSuggestions([]);
       playFieldSpeech(allFields[nextIndex]);
     } else {
-      // Form complete
+      // Form complete - use the passed data (to avoid stale state)
       stopListening();
-      onComplete(formData);
+      onComplete(currentFormData);
     }
   };
 
