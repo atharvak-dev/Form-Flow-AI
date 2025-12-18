@@ -99,7 +99,10 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
         setUserProfile(response.data);
         console.log('📋 User profile loaded for auto-fill:', response.data);
       } catch (error) {
-        console.warn('Could not fetch user profile for auto-fill:', error);
+        // Silently fail if user not logged in or token expired - auto-fill is optional
+        if (error.response?.status !== 401) {
+          console.warn('Could not fetch user profile for auto-fill:', error);
+        }
       }
     };
 
@@ -196,8 +199,14 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
     const audio = new Audio(audioUrl);
     audioRef.current = audio;
 
-    audio.play().catch(e => {
-      console.warn("Audio auto-play blocked or failed:", e);
+    // Wait for audio to be ready before playing
+    audio.addEventListener('canplaythrough', () => {
+      audio.play().catch(e => {
+        // Autoplay might be blocked - this is normal in modern browsers
+        if (e.name !== 'AbortError') {
+          console.warn("Audio blocked:", e.name);
+        }
+      });
     });
   };
 
@@ -228,13 +237,16 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
     setTimeout(() => {
       const field = allFields[activeIndex];
 
+      // Normalize text: trim and collapse multiple spaces
+      const normalizedText = text.trim().replace(/\s+/g, ' ');
+
       // Update State (for UI)
-      setFormData(prev => ({ ...prev, [field.name]: text }));
+      setFormData(prev => ({ ...prev, [field.name]: normalizedText }));
 
       // Update Ref (for logic/submission safety)
-      formDataRef.current = { ...formDataRef.current, [field.name]: text };
+      formDataRef.current = { ...formDataRef.current, [field.name]: normalizedText };
 
-      setLastFilled({ label: field.label || field.name, value: text }); // Store last answer
+      setLastFilled({ label: field.label || field.name, value: normalizedText }); // Store last answer
       setTranscript('');
       setProcessing(false);
       handleNextField(activeIndex);

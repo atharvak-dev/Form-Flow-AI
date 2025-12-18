@@ -408,9 +408,58 @@ class FormSubmitter:
                         await asyncio.sleep(0.2)
                         return True
                     elif field_type == 'select' or field_type == 'dropdown':
-                        await element.select_option(value)
-                        await asyncio.sleep(0.2)
-                        return True
+                        # Enhanced dropdown selection with multiple strategies
+                        try:
+                            # Strategy 1: Try select_option by value (exact match)
+                            await element.select_option(value=value)
+                            await asyncio.sleep(0.2)
+                            return True
+                        except:
+                            pass
+                        
+                        try:
+                            # Strategy 2: Try select_option by label (exact match)
+                            await element.select_option(label=value)
+                            await asyncio.sleep(0.2)
+                            return True
+                        except:
+                            pass
+                        
+                        # Strategy 3: Find option by partial text match
+                        try:
+                            options = await element.query_selector_all('option')
+                            for option in options:
+                                option_text = await option.inner_text()
+                                option_value = await option.get_attribute('value')
+                                
+                                if value.lower() in option_text.lower() or \
+                                   (option_value and value.lower() in option_value.lower()):
+                                    await element.select_option(value=option_value or option_text)
+                                    await asyncio.sleep(0.2)
+                                    return True
+                        except:
+                            pass
+                        
+                        # Strategy 4: Click and select (for custom dropdowns)
+                        try:
+                            await element.click()
+                            await asyncio.sleep(0.3)
+                            option_selectors = [
+                                f"option:has-text('{value[:30]}')",
+                                f"[role='option']:has-text('{value[:30]}')",
+                                f"li:has-text('{value[:30]}')"
+                            ]
+                            for opt_sel in option_selectors:
+                                opt_el = await page.query_selector(opt_sel)
+                                if opt_el:
+                                    await opt_el.click()
+                                    await asyncio.sleep(0.2)
+                                    return True
+                        except:
+                            pass
+                        
+                        print(f"⚠️ Could not select '{value}' in dropdown {field_name}")
+                        return False
                     elif field_type == 'textarea':
                         await element.click()
                         await asyncio.sleep(0.1)
