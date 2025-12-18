@@ -57,13 +57,18 @@ def normalize_email(value: str) -> str:
 
 
 def strengthen_password(value: str) -> str:
-    """Add missing special characters to password"""
+    """Add missing special characters and uppercase to password"""
+    # Add special character if missing
     if not re.search(r'[!@#$%^&*(),.?":{}|<>]', value):
-        # Replace space with @ or add @
         if ' ' in value:
             value = value.replace(' ', '@', 1)
         else:
             value = value + '@'
+    
+    # Add uppercase if missing - capitalize first letter
+    if not re.search(r'[A-Z]', value):
+        value = value[0].upper() + value[1:] if value else value
+    
     return value
 
 
@@ -115,12 +120,44 @@ def create_pattern_validator(pattern: str) -> Callable:
 def create_length_validator(min_len: int = None, max_len: int = None) -> Callable:
     """Create a length validator"""
     def validator(value: str) -> Tuple[bool, str]:
-        if min_len and len(value) < min_len:
+        # Skip invalid values (e.g., -1 from scraper)
+        if min_len and min_len > 0 and len(value) < min_len:
             return False, f"Must be at least {min_len} characters"
-        if max_len and len(value) > max_len:
+        if max_len and max_len > 0 and len(value) > max_len:
             return False, f"Must be at most {max_len} characters"
         return True, ""
     return validator
+
+
+# === Helper Detectors ===
+
+def is_name_field(field_name: str, field_label: str = "") -> bool:
+    """Detect if field is a name field"""
+    name_keywords = ['name', 'firstname', 'lastname', 'middlename', 'surname', 'fullname']
+    text = f"{field_name} {field_label}".lower()
+    return any(keyword in text for keyword in name_keywords)
+
+
+def is_email_field(field_type: str, field_name: str, field_label: str = "") -> bool:
+    """Detect if field is an email field"""
+    if field_type == 'email':
+        return True
+    text = f"{field_name} {field_label}".lower()
+    return 'email' in text or 'e-mail' in text
+
+
+def is_password_field(field_type: str, field_name: str, field_label: str = "") -> bool:
+    """Detect if field is a password field"""
+    if field_type == 'password':
+        return True
+    text = f"{field_name} {field_label}".lower()
+    return 'password' in text or 'pwd' in text
+
+
+def is_confirm_password(field_name: str, field_label: str = "") -> bool:
+    """Detect if field is a confirm password field"""
+    text = f"{field_name} {field_label}".lower()
+    return any(keyword in text for keyword in ['confirm', 'verify', 'repeat', 'retype', 'cpassword'])
 
 
 # === Schema Classes ===
@@ -176,9 +213,10 @@ class FormSchema:
         return len(errors) == 0, errors
     
     def format_all(self, data: Dict[str, str]) -> Dict[str, str]:
-        """Format all fields according to conventions"""
+        """Format all fields according to conventions and sync dependencies"""
         formatted = {}
         
+        # 1. Apply individual formatting
         for field_name, value in data.items():
             if field_name in self.fields:
                 formatted[field_name] = self.fields[field_name].format(value)
@@ -186,38 +224,34 @@ class FormSchema:
                 # Unknown field, pass through
                 formatted[field_name] = value
         
+        # 2. Synchronize Confirm Password fields
+        # Find password fields
+        main_password_value = None
+        main_passwords = []
+        confirm_passwords = []
+        
+        for name, value in formatted.items():
+            if name in self.fields:
+                conv = self.fields[name]
+                # Check if it's a password type
+                if is_password_field(conv.type, conv.name):
+                    if is_confirm_password(conv.name):
+                        confirm_passwords.append(name)
+                    else:
+                        main_passwords.append(name)
+        
+        # If we found exactly one main password, sync all confirm fields to it
+        # This handles the common case: Password + Confirm Password
+        if len(main_passwords) == 1 and confirm_passwords:
+            main_pwd_val = formatted[main_passwords[0]]
+            for conf_name in confirm_passwords:
+                print(f"🔄 Syncing {conf_name} to match {main_passwords[0]}")
+                formatted[conf_name] = main_pwd_val
+                
         return formatted
 
 
 # === Dynamic Schema Building ===
-
-def is_name_field(field_name: str, field_label: str = "") -> bool:
-    """Detect if field is a name field"""
-    name_keywords = ['name', 'firstname', 'lastname', 'middlename', 'surname', 'fullname']
-    text = f"{field_name} {field_label}".lower()
-    return any(keyword in text for keyword in name_keywords)
-
-
-def is_email_field(field_type: str, field_name: str, field_label: str = "") -> bool:
-    """Detect if field is an email field"""
-    if field_type == 'email':
-        return True
-    text = f"{field_name} {field_label}".lower()
-    return 'email' in text or 'e-mail' in text
-
-
-def is_password_field(field_type: str, field_name: str, field_label: str = "") -> bool:
-    """Detect if field is a password field"""
-    if field_type == 'password':
-        return True
-    text = f"{field_name} {field_label}".lower()
-    return 'password' in text or 'pwd' in text
-
-
-def is_confirm_password(field_name: str, field_label: str = "") -> bool:
-    """Detect if field is a confirm password field"""
-    text = f"{field_name} {field_label}".lower()
-    return any(keyword in text for keyword in ['confirm', 'verify', 'repeat', 'retype', 'cpassword'])
 
 
 def build_field_convention(field_info: Dict[str, Any]) -> FieldConvention:
@@ -280,22 +314,37 @@ def build_field_convention(field_info: Dict[str, Any]) -> FieldConvention:
     )
 
 
-def build_form_schema(form_data: Dict[str, Any]) -> FormSchema:
+def build_form_schema(form_data: Any) -> FormSchema:
     """
     Dynamically build FormSchema from scraped form data.
     
     Args:
-        form_data: Form schema from form_parser (includes fields array)
+        form_data: Form schema from form_parser (list of forms or single form dict)
     
     Returns:
         FormSchema with dynamically built field conventions
     """
-    form_id = form_data.get('action', 'unknown_form')
-    fields = []
-    
-    # Build field conventions for each scraped field
-    for form in form_data if isinstance(form_data, list) else [form_data]:
-        for field_info in form.get('fields', []):
+    # Handle list of forms (standard output from form_parser)
+    if isinstance(form_data, list):
+        if not form_data:
+            return FormSchema(form_id='unknown_form', fields=[])
+        
+        # Use first form's action as form_id
+        form_id = form_data[0].get('action', 'unknown_form')
+        fields = []
+        
+        # Build field conventions from all forms
+        for form in form_data:
+            for field_info in form.get('fields', []):
+                if field_info.get('type') not in ['submit', 'button', 'reset', 'image']:
+                    convention = build_field_convention(field_info)
+                    fields.append(convention)
+    else:
+        # Handle single form dict
+        form_id = form_data.get('action', 'unknown_form')
+        fields = []
+        
+        for field_info in form_data.get('fields', []):
             if field_info.get('type') not in ['submit', 'button', 'reset', 'image']:
                 convention = build_field_convention(field_info)
                 fields.append(convention)

@@ -133,10 +133,11 @@ class FormSubmitter:
                     await asyncio.sleep(1)
                 
                 # Find and fill the form with retry logic
+                initial_url = page.url
                 submission_result = await self._fill_and_submit_form(page, form_data, form_schema, is_google_form)
                 
                 # Validate submission
-                validation_result = await self.validate_form_submission(page)
+                validation_result = await self.validate_form_submission(page, initial_url)
                 
                 # Take screenshot for verification
                 screenshot = await page.screenshot()
@@ -875,36 +876,29 @@ class FormSubmitter:
         
         return False
     
-    async def validate_form_submission(self, page) -> Dict[str, Any]:
+    async def validate_form_submission(self, page, initial_url: str = "") -> Dict[str, Any]:
         """
         Validate if form submission was successful by checking for success indicators with enhanced detection
         """
         success_indicators = [
-            "thank you",
-            "thankyou",
-            "success",
-            "submitted",
-            "received",
-            "confirmation",
-            "complete",
-            "your response has been recorded",
-            "form submitted",
-            "response recorded"
+            "thank you", "thankyou", "success", "submitted", "received",
+            "confirmation", "complete", "your response has been recorded",
+            "form submitted", "response recorded",
+            # New indicators for redirects
+            "verify", "verification", "check your email", "email sent",
+            "login", "sign in", "dashboard", "click here to login",
+            "account created", "welcome", "password", " otp "
         ]
         
         error_indicators = [
-            "error",
-            "invalid",
-            "required field",
-            "missing",
-            "failed",
-            "please fill",
-            "this field is required"
+            "error", "invalid", "required field", "missing", "failed",
+            "please fill", "this field is required", "must be",
+            "correct the errors"
         ]
         
         try:
-            # Wait a bit for page to update
-            await asyncio.sleep(1)
+            # Wait a bit for page to update/redirect
+            await asyncio.sleep(2)
             
             page_text = await page.inner_text('body')
             page_text_lower = page_text.lower()
@@ -913,9 +907,19 @@ class FormSubmitter:
             success_found = any(indicator in page_text_lower for indicator in success_indicators)
             error_found = any(indicator in page_text_lower for indicator in error_indicators)
             
-            # Check URL change (often indicates successful submission)
+            # Check URL change (strong indicator)
             current_url = page.url.lower()
-            url_changed = any(word in current_url for word in ['thank', 'success', 'confirmation', 'complete', 'submitted'])
+            url_changed = False
+            if initial_url:
+                try:
+                    initial_parse = urlparse(initial_url)
+                    current_parse = urlparse(current_url)
+                    # Consider it changed if path is different (ignore query params which might just be session IDs)
+                    url_changed = initial_parse.path != current_parse.path
+                except:
+                    url_changed = initial_url != current_url
+            
+            url_success_keywords = any(word in current_url for word in ['thank', 'success', 'confirmation', 'complete', 'submitted', 'login', 'dashboard', 'verify'])
             
             # For Google Forms, check for specific success messages
             is_google_form = 'docs.google.com/forms' in page.url
@@ -936,22 +940,36 @@ class FormSubmitter:
                     except:
                         continue
             
-            # Check if form is still visible (might indicate failure)
-            form_still_visible = await page.query_selector('form') is not None
+            # Check if ORIGINAL form is still visible (might indicate failure)
+            # Be careful: seeing A form (like login form) doesn't mean failure
+            form_selector = 'form'
+            if initial_url: # Try to be smart about whether it's the SAME form
+                pass 
+            
+            form_still_visible = False
+            if not url_changed:
+                 form_still_visible = await page.query_selector('form') is not None
             
             # Overall success determination
+            # If URL changed significantly (path change), it's likely success unless we see specific errors
+            # If "login" or "verify" words appear, it's likely success (new account flow)
+            
             likely_success = (
-                success_found or 
-                url_changed or 
                 google_success or
-                (not form_still_visible and not error_found)
+                (success_found and not error_found) or
+                (url_changed and not error_found) or 
+                url_success_keywords
             )
+            
+            # Override: if explicitly seeing "error", it's not success
+            if error_found:
+                likely_success = False
             
             return {
                 "likely_success": likely_success,
-                "likely_error": error_found and not success_found,
+                "likely_error": error_found,
                 "current_url": page.url,
-                "success_indicators_found": success_found or google_success,
+                "success_indicators_found": success_found or google_success or url_success_keywords,
                 "error_indicators_found": error_found,
                 "url_changed": url_changed,
                 "google_form_success": google_success if is_google_form else None
