@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, HttpUrl
@@ -18,6 +18,13 @@ from form_submitter import FormSubmitter
 from gemini_service import GeminiService
 from vosk_service import VoskService
 from form_conventions import get_form_schema as get_schema, FormSchema
+
+# Auth & DB Imports
+from fastapi.security import OAuth2PasswordRequestForm
+from fastapi import Depends, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+import models, schemas, auth, database
 
 # Load environment variables from .env file
 load_dotenv()
@@ -58,6 +65,71 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- Database Initialization ---
+@app.on_event("startup")
+async def startup_event():
+    async with database.engine.begin() as conn:
+        await conn.run_sync(models.Base.metadata.create_all)
+
+# --- User & Auth Endpoints ---
+
+@app.post("/register", response_model=schemas.UserResponse)
+async def register(user: schemas.UserCreate, db: AsyncSession = Depends(database.get_db)):
+    # Check if email exists
+    result = await db.execute(select(models.User).filter(models.User.email == user.email))
+    if result.scalars().first():
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # Create user
+    hashed_password = auth.get_password_hash(user.password)
+    db_user = models.User(
+        email=user.email,
+        password_hash=hashed_password,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        mobile=user.mobile,
+        country=user.country,
+        state=user.state,
+        city=user.city,
+        pincode=user.pincode
+    )
+    db.add(db_user)
+    await db.commit()
+    await db.refresh(db_user)
+    return db_user
+
+@app.post("/login", response_model=schemas.Token)
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(database.get_db)):
+    # Authenticate user
+    result = await db.execute(select(models.User).filter(models.User.email == form_data.username))
+    user = result.scalars().first()
+    
+    if not user or not auth.verify_password(form_data.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    access_token_expires = auth.timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = auth.create_access_token(
+        data={"sub": user.email}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.get("/users/me", response_model=schemas.UserResponse)
+async def read_users_me(current_user: models.User = Depends(auth.get_current_user)):
+    return current_user
+
+@app.get("/history", response_model=List[schemas.FormSubmissionResponse])
+async def get_history(current_user: models.User = Depends(auth.get_current_user), db: AsyncSession = Depends(database.get_db)):
+    result = await db.execute(
+        select(models.FormSubmission)
+        .filter(models.FormSubmission.user_id == current_user.id)
+        .order_by(models.FormSubmission.timestamp.desc())
+    )
+    return result.scalars().all()
 
 
 class ScrapeRequest(BaseModel):
@@ -383,7 +455,11 @@ async def fill_form(data: FormFillRequest):
         raise HTTPException(status_code=500, detail=f"Form filling failed: {str(e)}")
 
 @app.post("/submit-form")
-async def submit_form(data: FormSubmitRequest):
+async def submit_form(
+    data: FormSubmitRequest, 
+    request: Request,
+    db: AsyncSession = Depends(database.get_db)
+):
     """Submit form data with dynamic schema validation and formatting."""
     try:
         print(f"Submitting form to: {data.url}")
@@ -392,6 +468,9 @@ async def submit_form(data: FormSubmitRequest):
         # Build schema dynamically from scraped form_schema
         schema = get_schema(data.url, form_data=data.form_schema)
         
+        result = None
+        formatted_data = data.form_data
+
         if schema:
             print(f"✅ Built schema with {len(schema.fields)} fields")
             
@@ -419,13 +498,43 @@ async def submit_form(data: FormSubmitRequest):
         else:
             # No schema available, use raw data
             print("⚠️ No schema built, using raw data")
-            formatted_data = data.form_data
             result = await form_submitter.submit_form_data(
                 url=data.url,
                 form_data=data.form_data,
                 form_schema=data.form_schema
             )
         
+        # --- History Tracking ---
+        try:
+            auth_header = request.headers.get('Authorization')
+            if auth_header and auth_header.startswith('Bearer '):
+                token = auth_header.split(' ')[1]
+                try:
+                    # Manually verify to avoid failing the whole request on invalid token
+                    payload = auth.jwt.decode(token, auth.SECRET_KEY, algorithms=[auth.ALGORITHM])
+                    email: str = payload.get("sub")
+                    
+                    if email:
+                        # Find user
+                        user_res = await db.execute(select(models.User).filter(models.User.email == email))
+                        user = user_res.scalars().first()
+                        
+                        if user:
+                            # Record submission
+                            status_str = "Success" if result and result.get("success") else "Failed"
+                            submission = models.FormSubmission(
+                                user_id=user.id,
+                                form_url=data.url,
+                                status=status_str
+                            )
+                            db.add(submission)
+                            await db.commit()
+                            print(f"📝 Recorded submission history for user {user.email}")
+                except Exception as e:
+                    print(f"⚠️ Failed to record history (Auth error): {e}")
+        except Exception as e:
+            print(f"⚠️ History tracking error: {e}")
+
         return {
             "message": "Form submission completed",
             "success": result["success"],
