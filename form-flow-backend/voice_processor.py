@@ -41,6 +41,7 @@ class VoiceProcessor:
         field_name = field_info.get('label', field_info.get('name', 'field'))
         field_type = field_info.get('type', 'text')
         required = field_info.get('required', False)
+        options = field_info.get('options', [])
         
         prompt_templates = {
             'email': f"Please provide your email address for {field_name}",
@@ -48,12 +49,24 @@ class VoiceProcessor:
             'tel': f"Please provide your phone number for {field_name}",
             'date': f"Please provide the date for {field_name} (you can say it naturally like 'January 15th 2024')",
             'select': f"Please choose from the available options for {field_name}",
+            'dropdown': f"Please choose from the available options for {field_name}",
+            'radio': f"Please choose one of the options for {field_name}",
             'textarea': f"Please provide your response for {field_name}. You can speak as much as needed",
             'checkbox': f"Say 'yes' to check or 'no' to uncheck {field_name}",
             'text': f"Please provide {field_name}"
         }
         
         base_prompt = prompt_templates.get(field_type, f"Please provide {field_name}")
+        
+        # Add options listing for dropdown/select/radio fields
+        if field_type in ['select', 'dropdown', 'radio'] and options:
+            option_labels = [opt.get('label', opt.get('value', '')) for opt in options if opt.get('label') or opt.get('value')]
+            if option_labels:
+                options_text = ", ".join(f'"{label}"' for label in option_labels[:10])  # Limit to 10 for readability
+                if len(option_labels) > 10:
+                    options_text += f" (and {len(option_labels) - 10} more)"
+                base_prompt = f"For {field_name}, please choose one of: {options_text}"
+        
         if required:
             base_prompt += " (This field is required)"
             
@@ -67,8 +80,23 @@ class VoiceProcessor:
 
         field_type = field_info.get('type', 'text')
         field_name = field_info.get('label', field_info.get('name', 'field'))
-        is_email = field_info.get('is_email', False) or field_type == 'email'
+        
+        # Enhanced email detection: check type, flag, name patterns, or transcript content
+        is_email = (
+            field_info.get('is_email', False) or 
+            field_type == 'email' or
+            'email' in field_name.lower() or
+            'e-mail' in field_name.lower() or
+            '@' in transcript or
+            ' at gmail' in transcript.lower() or
+            ' at yahoo' in transcript.lower() or
+            ' at outlook' in transcript.lower() or
+            'dot com' in transcript.lower()
+        )
+        
         is_checkbox = field_info.get('is_checkbox', False) or field_type == 'checkbox'
+        is_dropdown = field_info.get('is_dropdown', False) or field_type in ['select', 'dropdown', 'radio']
+        options = field_info.get('options', [])
         
         special_instructions = ""
         if is_email:
@@ -98,6 +126,32 @@ class VoiceProcessor:
         - Default to 'false' if unclear
         - Example: 'yes I agree' becomes 'true', 'no thanks' becomes 'false'
         """
+        elif is_dropdown and options:
+            # Build options list for LLM
+            options_list = []
+            for opt in options:
+                value = opt.get('value', '')
+                label = opt.get('label', value)
+                options_list.append(f'  - Value: "{value}", Label: "{label}"')
+            options_text = "\n".join(options_list)
+            
+            special_instructions = f"""
+        SPECIAL DROPDOWN/SELECT FIELD RULES:
+        This is a constrained choice field. The user MUST select from these valid options ONLY:
+{options_text}
+        
+        CRITICAL MATCHING RULES:
+        1. Match the user's spoken input to the CLOSEST valid option above
+        2. Use fuzzy matching - "united states" matches "USA", "u.s.a." matches "USA"
+        3. Return the exact VALUE (not label) in processed_text for correct form submission
+        4. If no reasonable match found, set confidence to 0.2 and ask for clarification
+        5. If multiple options could match, ask user to clarify
+        
+        Examples:
+        - User says "I'm from the United States" -> processed_text: "USA" (if USA is a valid value)
+        - User says "the first option" -> processed_text: (first option's value)
+        - User says "something not in list" -> confidence: 0.2, ask for clarification
+        """
         
         prompt = f"""
         Form Context: {form_context}
@@ -114,6 +168,7 @@ class VoiceProcessor:
         4. If unclear or incomplete, suggest clarifying questions
         5. Provide confidence score (0-1) - be conservative if uncertain
         6. For email fields, double-check that '@' and '.' are in correct positions
+        7. For dropdown/select fields: ONLY return valid option values, never free text
         
         IMPORTANT FOR EMAIL FIELDS:
         - If the transcript contains email-like patterns, ensure proper formatting

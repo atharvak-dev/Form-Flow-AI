@@ -16,6 +16,7 @@ from voice_processor import VoiceProcessor
 from speech_service import SpeechService
 from form_submitter import FormSubmitter
 from gemini_service import GeminiService
+from deepgram_service import DeepgramService
 
 # Load environment variables from .env file
 load_dotenv()
@@ -25,6 +26,7 @@ load_dotenv()
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
+DEEPGRAM_API_KEY = os.environ.get("DEEPGRAM_API_KEY")
 
 # Store speech data globally (in production, use proper session management)
 global_speech_data = {}
@@ -35,11 +37,15 @@ if not ELEVENLABS_API_KEY:
 if not GOOGLE_API_KEY:
     print("WARNING: GOOGLE_API_KEY not found. LLM integration will not work until this is set.")
 
+if not DEEPGRAM_API_KEY:
+    print("WARNING: DEEPGRAM_API_KEY not found. High-accuracy speech-to-text will use browser fallback.")
+
 # Initialize Voice Processor, Speech Service, Form Submitter, and Gemini Service
 voice_processor = VoiceProcessor(openai_key=OPENAI_API_KEY, gemini_key=GOOGLE_API_KEY)
 speech_service = SpeechService(api_key=ELEVENLABS_API_KEY)
 form_submitter = FormSubmitter()
 gemini_service = GeminiService(api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None
+deepgram_service = DeepgramService(api_key=DEEPGRAM_API_KEY)
 
 app = FastAPI()
 
@@ -195,6 +201,64 @@ async def process_voice(data: VoiceProcessRequest):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Voice processing failed: {str(e)}")
+
+
+@app.post("/transcribe")
+async def transcribe_audio(audio: UploadFile = File(...)):
+    """
+    Transcribe audio using Deepgram's high-accuracy Nova-2 model.
+    
+    Accepts audio file (WebM, WAV, MP3, etc.) and returns transcript.
+    Falls back to empty response if Deepgram is not configured.
+    """
+    try:
+        if not deepgram_service.is_available():
+            return {
+                "success": False,
+                "error": "Deepgram not configured. Add DEEPGRAM_API_KEY to .env",
+                "transcript": "",
+                "use_browser_fallback": True
+            }
+        
+        # Read audio data
+        audio_data = await audio.read()
+        content_type = audio.content_type or "audio/webm"
+        
+        print(f"🎤 Received audio: {len(audio_data)} bytes, type: {content_type}")
+        
+        # Transcribe with Deepgram
+        result = await deepgram_service.transcribe_audio(
+            audio_data=audio_data,
+            mime_type=content_type
+        )
+        
+        if result["success"]:
+            print(f"✅ Transcription: {result['transcript'][:100]}...")
+            return {
+                "success": True,
+                "transcript": result["transcript"],
+                "confidence": result["confidence"],
+                "words": result.get("words", [])
+            }
+        else:
+            print(f"⚠️ Transcription failed: {result.get('error')}")
+            return {
+                "success": False,
+                "error": result.get("error", "Transcription failed"),
+                "transcript": "",
+                "use_browser_fallback": True
+            }
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "error": str(e),
+            "transcript": "",
+            "use_browser_fallback": True
+        }
+
 
 @app.post("/generate-conversational-flow")
 async def generate_conversational_flow(data: ConversationalFlowRequest):
