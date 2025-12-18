@@ -12,7 +12,7 @@ const Navigation = () => {
   const location = useLocation();
 
   return (
-    <nav className="absolute top-6 right-8 z-50 flex items-center gap-2 bg-white/40 backdrop-blur-xl px-2 py-2 rounded-full border border-white/20 shadow-lg shadow-black/5">
+    <nav className="fixed top-6 right-8 z-[100] flex items-center gap-2 bg-white/40 backdrop-blur-xl px-2 py-2 rounded-full border border-white/20 shadow-lg shadow-black/5">
       <Link to="/" className="px-4 py-2 rounded-full text-gray-600 hover:text-black hover:bg-white/50 transition-all font-medium text-sm tracking-wide">Home</Link>
 
       {localStorage.getItem('token') ? (
