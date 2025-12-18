@@ -17,6 +17,7 @@ from speech_service import SpeechService
 from form_submitter import FormSubmitter
 from gemini_service import GeminiService
 from deepgram_service import DeepgramService
+from elevenlabs_stt_service import ElevenLabsSTTService
 
 # Load environment variables from .env file
 load_dotenv()
@@ -46,6 +47,7 @@ speech_service = SpeechService(api_key=ELEVENLABS_API_KEY)
 form_submitter = FormSubmitter()
 gemini_service = GeminiService(api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None
 deepgram_service = DeepgramService(api_key=DEEPGRAM_API_KEY)
+elevenlabs_stt_service = ElevenLabsSTTService(api_key=ELEVENLABS_API_KEY)
 
 app = FastAPI()
 
@@ -206,48 +208,65 @@ async def process_voice(data: VoiceProcessRequest):
 @app.post("/transcribe")
 async def transcribe_audio(audio: UploadFile = File(...)):
     """
-    Transcribe audio using Deepgram's high-accuracy Nova-2 model.
+    Transcribe audio using ElevenLabs realtime STT (primary) or Deepgram (fallback).
     
     Accepts audio file (WebM, WAV, MP3, etc.) and returns transcript.
-    Falls back to empty response if Deepgram is not configured.
+    Tries ElevenLabs first (uses same API key as TTS), then Deepgram if configured.
     """
     try:
-        if not deepgram_service.is_available():
-            return {
-                "success": False,
-                "error": "Deepgram not configured. Add DEEPGRAM_API_KEY to .env",
-                "transcript": "",
-                "use_browser_fallback": True
-            }
-        
         # Read audio data
         audio_data = await audio.read()
         content_type = audio.content_type or "audio/webm"
         
         print(f"🎤 Received audio: {len(audio_data)} bytes, type: {content_type}")
         
-        # Transcribe with Deepgram
-        result = await deepgram_service.transcribe_audio(
-            audio_data=audio_data,
-            mime_type=content_type
-        )
+        # Try ElevenLabs STT first (primary)
+        if elevenlabs_stt_service.is_available():
+            print("🔊 Using ElevenLabs STT...")
+            result = await elevenlabs_stt_service.transcribe_audio(
+                audio_data=audio_data,
+                sample_rate=16000
+            )
+            
+            if result["success"] and result["transcript"]:
+                print(f"✅ ElevenLabs transcription: {result['transcript'][:100]}...")
+                return {
+                    "success": True,
+                    "transcript": result["transcript"],
+                    "confidence": result["confidence"],
+                    "provider": "elevenlabs",
+                    "words": result.get("words", [])
+                }
+            else:
+                print(f"⚠️ ElevenLabs STT failed: {result.get('error')}, trying Deepgram...")
         
-        if result["success"]:
-            print(f"✅ Transcription: {result['transcript'][:100]}...")
-            return {
-                "success": True,
-                "transcript": result["transcript"],
-                "confidence": result["confidence"],
-                "words": result.get("words", [])
-            }
-        else:
-            print(f"⚠️ Transcription failed: {result.get('error')}")
-            return {
-                "success": False,
-                "error": result.get("error", "Transcription failed"),
-                "transcript": "",
-                "use_browser_fallback": True
-            }
+        # Fallback to Deepgram
+        if deepgram_service.is_available():
+            print("🔊 Falling back to Deepgram STT...")
+            result = await deepgram_service.transcribe_audio(
+                audio_data=audio_data,
+                mime_type=content_type
+            )
+            
+            if result["success"]:
+                print(f"✅ Deepgram transcription: {result['transcript'][:100]}...")
+                return {
+                    "success": True,
+                    "transcript": result["transcript"],
+                    "confidence": result["confidence"],
+                    "provider": "deepgram",
+                    "words": result.get("words", [])
+                }
+            else:
+                print(f"⚠️ Deepgram transcription failed: {result.get('error')}")
+        
+        # No STT service available
+        return {
+            "success": False,
+            "error": "No STT service available. Configure ELEVENLABS_API_KEY or DEEPGRAM_API_KEY",
+            "transcript": "",
+            "use_browser_fallback": True
+        }
             
     except Exception as e:
         import traceback
