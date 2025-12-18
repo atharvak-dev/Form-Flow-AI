@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Play, Pause, CheckCircle, AlertCircle } from 'lucide-react';
+import { Mic, MicOff, Play, Pause, CheckCircle, AlertCircle, Volume2 } from 'lucide-react';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'framer-motion';
+import Aurora from '@/components/ui/Aurora';
 
 const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
   const [isListening, setIsListening] = useState(false);
@@ -10,13 +11,13 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
   const [transcript, setTranscript] = useState('');
   const [processing, setProcessing] = useState(false);
   const [currentPrompt, setCurrentPrompt] = useState('');
-  const [pauseTimer, setPauseTimer] = useState(null);
 
   // Browser STT refs
   const recognitionRef = useRef(null);
   const pauseTimeoutRef = useRef(null);
   const indexRef = useRef(0); // Ref to track current index to avoid stale closures
   const formDataRef = useRef({}); // Ref to track form data to avoid stale closures
+  const audioRef = useRef(null); // Ref for audio playback
 
   const [lastFilled, setLastFilled] = useState(null); // Track last answer
 
@@ -52,17 +53,46 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
       recognitionRef.current.onerror = handleBrowserSpeechError;
     }
 
-    if (allFields.length > 0) {
-      const firstField = allFields[0];
-      const prompt = firstField.smart_prompt || `Please provide ${firstField.label || firstField.name}`;
-      setCurrentPrompt(prompt);
-      // Removed auto-play audio for now to focus on UI, or re-add if needed
-    }
-
     return () => {
       if (recognitionRef.current) recognitionRef.current.stop();
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
     };
   }, []);
+
+  // Effect to handle field changes: Update prompt and Play Audio
+  useEffect(() => {
+    if (allFields.length > 0 && currentFieldIndex < allFields.length) {
+      const field = allFields[currentFieldIndex];
+      const prompt = field.smart_prompt || `Please provide ${field.label || field.name}`;
+      setCurrentPrompt(prompt);
+
+      // Auto-play audio for the field
+      playPrompt(field.name);
+    }
+  }, [currentFieldIndex, allFields]);
+
+  const playPrompt = (fieldName) => {
+    if (!fieldName) return;
+
+    // Stop current audio if any
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+
+    // Backend endpoint for speech
+    const audioUrl = `http://127.0.0.1:8000/speech/${encodeURIComponent(fieldName)}`;
+
+    const audio = new Audio(audioUrl);
+    audioRef.current = audio;
+
+    audio.play().catch(e => {
+      console.warn("Audio auto-play blocked or failed:", e);
+    });
+  };
 
   const handleBrowserSpeechResult = (event) => {
     let finalTranscript = '';
@@ -108,8 +138,6 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
     if (currentIndex < allFields.length - 1) {
       const nextIndex = currentIndex + 1;
       setCurrentFieldIndex(nextIndex); // Update State
-      const nextField = allFields[nextIndex];
-      setCurrentPrompt(nextField.smart_prompt || `Please provide ${nextField.label || nextField.name}`);
     } else {
       // Use Ref here to ensure we send the accumulated data, not the stale state closure
       console.log("Form Complete. Submitting:", formDataRef.current);
@@ -204,12 +232,21 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
                 exit={{ opacity: 0, y: -20 }}
                 className="py-2"
               >
-                <div className="bg-white/5 border border-white/10 rounded-2xl p-8 text-center backdrop-blur-sm min-h-[160px] flex flex-col justify-center items-center">
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-8 text-center backdrop-blur-sm min-h-[160px] flex flex-col justify-center items-center relative group">
+                  {/* Replay Button */}
+                  <button
+                    onClick={() => playPrompt(currentField?.name)}
+                    className="absolute top-4 right-4 p-2 rounded-full bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-all opacity-0 group-hover:opacity-100"
+                    title="Replay Voice"
+                  >
+                    <Volume2 size={16} />
+                  </button>
+
                   <h3 className="text-3xl font-medium text-white mb-3 tracking-tight">
                     {currentPrompt}
                   </h3>
-                  <p className="text-white/40 text-sm uppercase tracking-wider font-semibold">
-                    {currentField?.label || currentField?.name} {currentField?.required && <span className="text-red-400">*</span>}
+                  <p className="text-white/40 text-sm uppercase tracking-wider font-semibold flex items-center justify-center gap-2">
+                    {currentField?.label || currentField?.name} {currentField?.required && <span className="text-red-400 text-xs tracking-normal px-2 py-0.5 rounded bg-red-400/10 border border-red-400/20">* Required</span>}
                   </p>
                 </div>
               </motion.div>
@@ -247,8 +284,8 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
             <button
               onClick={toggleListening}
               className={`w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 shadow-2xl ${isListening
-                ? 'bg-red-500/20 text-red-400 border border-red-500/50 hover:bg-red-500/30 shadow-[0_0_30px_rgba(239,68,68,0.3)]'
-                : 'bg-green-500 text-black hover:scale-105 shadow-[0_0_30px_rgba(34,197,94,0.4)]'
+                  ? 'bg-red-500/20 text-red-400 border border-red-500/50 hover:bg-red-500/30 shadow-[0_0_30px_rgba(239,68,68,0.3)]'
+                  : 'bg-green-500 text-black hover:scale-105 shadow-[0_0_30px_rgba(34,197,94,0.4)]'
                 }`}
             >
               {isListening ? <MicOff size={32} /> : <Mic size={32} />}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import Aurora from '@/components/ui/Aurora';
 import { Terminal, Cpu, Wifi, Activity } from 'lucide-react';
@@ -9,6 +9,8 @@ const TerminalLoader = ({ url }) => {
     const [progress, setProgress] = useState(0);
     const [timeLeft, setTimeLeft] = useState(25);
     const [logs, setLogs] = useState([]);
+    const logsEndRef = useRef(null);
+    const processedMilestones = useRef(new Set()); // Track added logs to prevent duplicates
 
     // Simulated progress and logs
     useEffect(() => {
@@ -28,21 +30,34 @@ const TerminalLoader = ({ url }) => {
                 setTimeLeft(prev => Math.max(prev - 1, 1));
             }
 
+            // Helper to safely add log only once per milestone
+            const tryAddLog = (milestone, message) => {
+                if (newProgress >= milestone && !processedMilestones.current.has(milestone)) {
+                    addLog(message);
+                    processedMilestones.current.add(milestone);
+                }
+            };
+
             // Simulated logs
-            if (newProgress === 2) addLog('Initialize engine v2.0.4');
-            if (newProgress === 8) addLog(`Target confirmed: ${new URL(url).hostname}`);
-            if (newProgress === 15) addLog('Handshaking secured connection...');
-            if (newProgress === 25) addLog('Parsing DOM structure tree...');
-            if (newProgress === 38) addLog('Identifying interactive fields...');
-            if (newProgress === 50) addLog('Optimizing context window...');
-            if (newProgress === 65) addLog(' generating smart prompts...');
-            if (newProgress === 80) addLog('Synthesizing voice layout...');
-            if (newProgress === 92) addLog('Finalizing setup sequence...');
+            tryAddLog(2, 'Initialize engine v2.0.4');
+            tryAddLog(8, `Target confirmed: ${new URL(url).hostname}`);
+            tryAddLog(15, 'Handshaking secured connection...');
+            tryAddLog(25, 'Parsing DOM structure tree...');
+            tryAddLog(38, 'Identifying interactive fields...');
+            tryAddLog(50, 'Optimizing context window...');
+            tryAddLog(65, 'Generating smart prompts...');
+            tryAddLog(80, 'Synthesizing voice layout...');
+            tryAddLog(92, 'Finalizing setup sequence...');
 
         }, updateInterval);
 
         return () => clearInterval(timer);
     }, [url]);
+
+    // Auto-scroll to bottom
+    useEffect(() => {
+        logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [logs]);
 
     const addLog = (message) => {
         setLogs(prev => [...prev, { text: message, timestamp: new Date().toLocaleTimeString('en-US', { hour12: false }) }]);
@@ -122,19 +137,29 @@ const TerminalLoader = ({ url }) => {
                     </div>
 
                     {/* Scrolling Logs */}
-                    <div className="flex-1 overflow-hidden flex flex-col-reverse relative z-0">
+                    <style>{`
+                        .no-scrollbar::-webkit-scrollbar {
+                            display: none;
+                        }
+                        .no-scrollbar {
+                            -ms-overflow-style: none;
+                            scrollbar-width: none;
+                        }
+                    `}</style>
+                    <div className="flex-1 overflow-y-auto overflow-x-hidden no-scrollbar relative z-0 flex flex-col justify-start w-full">
                         {logs.map((log, index) => (
                             <motion.div
                                 key={index}
                                 initial={{ opacity: 0, x: -10 }}
                                 animate={{ opacity: 1, x: 0 }}
-                                className="flex gap-3 py-1"
+                                className="flex gap-3 py-1 w-full"
                             >
-                                <span className="text-white/30 select-none">[{log.timestamp}]</span>
-                                <span className="text-green-500 font-bold">➜</span>
-                                <span className="text-green-200/80">{log.text}</span>
+                                <span className="text-white/30 select-none shrink-0">[{log.timestamp}]</span>
+                                <span className="text-green-500 font-bold shrink-0">➜</span>
+                                <span className="text-green-200/80 font-mono break-all whitespace-pre-wrap flex-1 min-w-0">{log.text}</span>
                             </motion.div>
                         ))}
+                        <div ref={logsEndRef} />
                     </div>
 
                     <div className="mt-2 flex items-center gap-2 text-green-500 border-t border-white/10 pt-2 shrink-0">
