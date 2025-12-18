@@ -4,6 +4,7 @@ import VoiceFormFiller from './VoiceFormFiller';
 import FormCompletion from './FormCompletion';
 import { TransformationTimeline } from './TransformationTimeline';
 import { Hero } from '@/components/ui/animated-hero';
+import TerminalLoader from '@/components/ui/TerminalLoader';
 
 const LinkPaste = () => {
     const [url, setUrl] = useState('');
@@ -13,14 +14,15 @@ const LinkPaste = () => {
     const [completedData, setCompletedData] = useState(null);
     const [showCompletion, setShowCompletion] = useState(false);
 
-    const handleSubmit = async(e) => {
-        e.preventDefault();
+    const handleSubmit = async (e, submittedUrl = null) => {
+        if (e && e.preventDefault) e.preventDefault();
         setLoading(true);
+        const urlToUse = submittedUrl || url;
         try {
-            const response = await axios.post("http://localhost:8000/scrape", {url: url});
+            const response = await axios.post("http://localhost:8000/scrape", { url: urlToUse });
             setResult(response.data);
             setUrl('');
-        } catch(error) {
+        } catch (error) {
             console.log("Error submitting URL:", error);
             alert("Failed to submit URL. Please try again.");
         } finally {
@@ -54,7 +56,7 @@ const LinkPaste = () => {
 
     if (showCompletion && completedData && result) {
         return (
-            <FormCompletion 
+            <FormCompletion
                 formData={completedData}
                 formSchema={result.form_schema}
                 originalUrl={url}
@@ -65,7 +67,7 @@ const LinkPaste = () => {
 
     if (showVoiceForm && result) {
         return (
-            <VoiceFormFiller 
+            <VoiceFormFiller
                 formSchema={result.form_schema}
                 formContext={result.form_context}
                 onComplete={handleVoiceComplete}
@@ -75,7 +77,9 @@ const LinkPaste = () => {
 
     return (
         <div>
-            {!result && (
+            {loading && <TerminalLoader url={url} />}
+
+            {!result && !loading && (
                 <>
                     <Hero url={url} setUrl={setUrl} handleSubmit={handleSubmit} loading={loading} />
                     <TransformationTimeline />

@@ -60,7 +60,7 @@ function Hero({ url, setUrl, handleSubmit, loading }) {
             <PromptInputBox
               onSend={(message) => {
                 setUrl(message);
-                handleSubmit({ preventDefault: () => { } });
+                handleSubmit({ preventDefault: () => { } }, message);
               }}
               isLoading={loading}
               placeholder="Paste your form URL here..."

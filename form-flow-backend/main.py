@@ -167,6 +167,8 @@ async def scrape_form(data: ScrapeRequest):
 
         return response_data
 
+    except HTTPException as he:
+        raise he
     except Exception as e:
         import traceback
         traceback.print_exc()
