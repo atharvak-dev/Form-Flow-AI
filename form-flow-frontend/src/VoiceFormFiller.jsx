@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Mic, MicOff, Play, Pause, CheckCircle, AlertCircle } from 'lucide-react';
 import axios from 'axios';
-import Aurora from '@/components/ui/Aurora';
+import { motion, AnimatePresence } from 'framer-motion';
 
 const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
   const [isListening, setIsListening] = useState(false);
@@ -9,44 +9,43 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
   const [formData, setFormData] = useState({});
   const [transcript, setTranscript] = useState('');
   const [processing, setProcessing] = useState(false);
-  const [suggestions, setSuggestions] = useState([]);
   const [currentPrompt, setCurrentPrompt] = useState('');
   const [pauseTimer, setPauseTimer] = useState(null);
-  const [needsConfirmation, setNeedsConfirmation] = useState(false);
-  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [useDeepgram, setUseDeepgram] = useState(false); // Use browser STT (faster & more accurate)
 
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
-  const recognitionRef = useRef(null); // Browser STT
+  // Browser STT refs
+  const recognitionRef = useRef(null);
   const pauseTimeoutRef = useRef(null);
-  const audioRef = useRef(null);
-  const streamRef = useRef(null);
+  const indexRef = useRef(0); // Ref to track current index to avoid stale closures
+  const formDataRef = useRef({}); // Ref to track form data to avoid stale closures
+
+  const [lastFilled, setLastFilled] = useState(null); // Track last answer
+
+  // Sync ref with state
+  useEffect(() => {
+    indexRef.current = currentFieldIndex;
+  }, [currentFieldIndex]);
 
   const allFields = formSchema.flatMap(form =>
     form.fields.filter(field =>
       !field.hidden &&
       field.type !== 'submit' &&
-      // Skip confirm password in voice interaction (auto-filled from main password)
+      // Skip confirm password fields
       !(field.type === 'password' && (
         field.name.toLowerCase().includes('confirm') ||
         field.name.toLowerCase().includes('cpassword') ||
-        field.name.toLowerCase().includes('verify') ||
-        field.label?.toLowerCase().includes('confirm') ||
-        field.label?.toLowerCase().includes('verify')
+        field.name.toLowerCase().includes('verify')
       ))
     )
   );
 
   useEffect(() => {
-    // Initialize browser STT (primary)
+    // Initialize browser STT
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       recognitionRef.current = new SpeechRecognition();
       recognitionRef.current.continuous = true;
       recognitionRef.current.interimResults = true;
-      recognitionRef.current.lang = 'en-IN'; // Indian English for better name recognition
+      recognitionRef.current.lang = 'en-IN';
 
       recognitionRef.current.onresult = handleBrowserSpeechResult;
       recognitionRef.current.onend = handleBrowserSpeechEnd;
@@ -54,463 +53,208 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
     }
 
     if (allFields.length > 0) {
-      setCurrentPrompt(allFields[0].smart_prompt || `Please provide ${allFields[0].label || allFields[0].name}`);
-      playFieldSpeech(allFields[0]);
+      const firstField = allFields[0];
+      const prompt = firstField.smart_prompt || `Please provide ${firstField.label || firstField.name}`;
+      setCurrentPrompt(prompt);
+      // Removed auto-play audio for now to focus on UI, or re-add if needed
     }
 
     return () => {
-      // Cleanup
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
+      if (recognitionRef.current) recognitionRef.current.stop();
     };
   }, []);
 
-  // Browser fallback handlers (used when Deepgram fails)
   const handleBrowserSpeechResult = (event) => {
     let finalTranscript = '';
-    let interimTranscript = '';
-
     for (let i = event.resultIndex; i < event.results.length; i++) {
-      const transcript = event.results[i][0].transcript;
-      if (event.results[i].isFinal) {
-        finalTranscript += transcript;
-      } else {
-        interimTranscript += transcript;
-      }
+      if (event.results[i].isFinal) finalTranscript += event.results[i][0].transcript;
     }
-
-    setTranscript(finalTranscript || interimTranscript);
 
     if (finalTranscript) {
+      setTranscript(finalTranscript);
       clearTimeout(pauseTimeoutRef.current);
-      processVoiceInput(finalTranscript);
+      // Process logic using the CURRENT index from ref
+      processVoiceInput(finalTranscript, indexRef.current);
     } else {
-      clearTimeout(pauseTimeoutRef.current);
-      pauseTimeoutRef.current = setTimeout(() => {
-        handleUserPause();
-      }, 3000);
-    }
-  };
-
-  const handleBrowserSpeechEnd = () => {
-    if (isListening && !useDeepgram) {
-      recognitionRef.current.start();
-    }
-  };
-
-  const handleBrowserSpeechError = (event) => {
-    console.error('Browser speech recognition error:', event.error);
-    if (event.error === 'not-allowed') {
-      alert('Microphone access denied. Please allow microphone access in your browser settings.');
-    } else if (event.error === 'no-speech') {
-      console.log('No speech detected, continuing to listen...');
-      return;
-    }
-    setIsListening(false);
-  };
-
-  // Batch-based recording and transcription
-  const startListening = async () => {
-    setTranscript('');
-    setSuggestions([]);
-
-    if (useDeepgram) {
-      try {
-        // Get microphone access
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        streamRef.current = stream;
-
-        // Create MediaRecorder
-        const mediaRecorder = new MediaRecorder(stream, {
-          mimeType: 'audio/webm;codecs=opus'
-        });
-        mediaRecorderRef.current = mediaRecorder;
-        audioChunksRef.current = [];
-
-        mediaRecorder.ondataavailable = (event) => {
-          if (event.data.size > 0) {
-            audioChunksRef.current.push(event.data);
-          }
-        };
-
-        mediaRecorder.onstop = async () => {
-          // Send recorded audio to backend for transcription
-          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-          await transcribeWithDeepgram(audioBlob);
-        };
-
-        mediaRecorder.start();
-        setIsListening(true);
-        setIsRecording(true);
-        console.log('🎤 Started recording for transcription');
-
-      } catch (error) {
-        console.error('Failed to start recording:', error);
-        // Fall back to browser STT
-        setUseDeepgram(false);
-        startBrowserListening();
+      // Show interim results too if desired, for now we stick to final for processing but we could show interim in UI
+      let interim = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (!event.results[i].isFinal) interim += event.results[i][0].transcript;
       }
+      if (interim) setTranscript(interim);
+    }
+  };
+
+  const processVoiceInput = async (text, activeIndex) => {
+    setProcessing(true);
+    // Simulate processing for UI demo
+    setTimeout(() => {
+      const field = allFields[activeIndex];
+
+      // Update State (for UI)
+      setFormData(prev => ({ ...prev, [field.name]: text }));
+
+      // Update Ref (for logic/submission safety)
+      formDataRef.current = { ...formDataRef.current, [field.name]: text };
+
+      setLastFilled({ label: field.label || field.name, value: text }); // Store last answer
+      setTranscript('');
+      setProcessing(false);
+      handleNextField(activeIndex);
+    }, 1500);
+  };
+
+  const handleNextField = (currentIndex) => {
+    if (currentIndex < allFields.length - 1) {
+      const nextIndex = currentIndex + 1;
+      setCurrentFieldIndex(nextIndex); // Update State
+      const nextField = allFields[nextIndex];
+      setCurrentPrompt(nextField.smart_prompt || `Please provide ${nextField.label || nextField.name}`);
     } else {
-      startBrowserListening();
+      // Use Ref here to ensure we send the accumulated data, not the stale state closure
+      console.log("Form Complete. Submitting:", formDataRef.current);
+      onComplete(formDataRef.current);
     }
   };
 
-  const startBrowserListening = () => {
-    if (recognitionRef.current) {
-      try {
-        setIsListening(true);
-        setTranscript('');
-        recognitionRef.current.start();
-      } catch (error) {
-        console.error('Error starting browser speech recognition:', error);
-        alert('Failed to start voice input. Please try again.');
-        setIsListening(false);
-      }
-    } else {
-      alert('Voice input is not available. Please check your browser compatibility.');
-    }
-  };
+  const handleBrowserSpeechEnd = () => { if (isListening) recognitionRef.current.start(); };
+  const handleBrowserSpeechError = (e) => { console.error("Speech error", e); };
 
-  const stopListening = async () => {
-    setIsListening(false);
-    clearTimeout(pauseTimeoutRef.current);
-
-    if (useDeepgram && mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-
-      // Stop all tracks
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-    } else if (recognitionRef.current) {
+  const toggleListening = () => {
+    if (isListening) {
       recognitionRef.current.stop();
-    }
-  };
-
-  const transcribeWithDeepgram = async (audioBlob) => {
-    setProcessing(true);
-
-    try {
-      const formData = new FormData();
-      formData.append('audio', audioBlob, 'recording.webm');
-
-      const response = await axios.post('http://localhost:8000/transcribe', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
-      });
-
-      if (response.data.success && response.data.transcript) {
-        const transcribedText = response.data.transcript;
-        console.log('✅ Deepgram transcript:', transcribedText);
-        setTranscript(transcribedText);
-        await processVoiceInput(transcribedText);
-      } else if (response.data.use_browser_fallback) {
-        console.log('⚠️ Deepgram not available, using browser fallback');
-        setUseDeepgram(false);
-        setSuggestions(['Deepgram unavailable. Using browser voice recognition instead.']);
-        setProcessing(false);
-      } else {
-        setSuggestions(['Could not transcribe audio. Please try again.']);
-        setProcessing(false);
-      }
-    } catch (error) {
-      console.error('Deepgram transcription error:', error);
-      setSuggestions(['Transcription failed. Please try again.']);
-      setProcessing(false);
-    }
-  };
-
-  const processVoiceInput = async (voiceText) => {
-    if (currentFieldIndex >= allFields.length) return;
-
-    setProcessing(true);
-    const currentField = allFields[currentFieldIndex];
-
-    try {
-      const response = await axios.post('http://localhost:8000/process-voice', {
-        transcript: voiceText,
-        field_info: currentField,
-        form_context: formContext
-      });
-
-      const { processed_text, confidence, pronunciation_check, clarifying_questions } = response.data;
-
-      if (confidence < 0.6 || pronunciation_check.needs_confirmation) {
-        setNeedsConfirmation(true);
-        setSuggestions([
-          `I heard: "${processed_text}". Is this correct?`,
-          ...(clarifying_questions || [])
-        ]);
-      } else {
-        confirmFieldValue(processed_text);
-      }
-    } catch (error) {
-      console.error('Voice processing error:', error);
-      setSuggestions(['Sorry, I had trouble processing that. Could you try again?']);
-    } finally {
-      setProcessing(false);
-    }
-  };
-
-  const confirmFieldValue = (value) => {
-    const currentField = allFields[currentFieldIndex];
-
-    // Update form data with current field
-    const newFormData = { ...formData, [currentField.name]: value };
-
-    // Store password value for confirm password auto-fill
-    const fieldName = (currentField.name || '').toLowerCase();
-    const fieldLabel = (currentField.label || '').toLowerCase();
-    const isPasswordField = currentField.type === 'password' ||
-      fieldName.includes('password') ||
-      fieldLabel.includes('password');
-
-    // If this is a password field (but not confirm password), auto-fill confirm password
-    if (isPasswordField && !fieldName.includes('confirm') && !fieldLabel.includes('confirm') && !fieldName.includes('cpassword')) {
-      window._lastPasswordValue = value;
-
-      // Find confirm password field in the FULL form schema (not just voice fields)
-      const confirmPasswordField = formSchema.flatMap(form => form.fields).find(f => {
-        const fname = (f.name || '').toLowerCase();
-        const flabel = (f.label || '').toLowerCase();
-        return (f.type === 'password' || fname.includes('password') || flabel.includes('password')) &&
-          (fname.includes('confirm') || fname.includes('cpassword') || fname.includes('verify') ||
-            flabel.includes('confirm') || flabel.includes('verify'));
-      });
-
-      if (confirmPasswordField) {
-        console.log(`🔐 Auto-filling confirm password field: ${confirmPasswordField.name}`);
-        newFormData[confirmPasswordField.name] = value;
-      }
-    }
-
-    setFormData(newFormData);
-
-    // Pass updated data to moveToNextField
-    moveToNextField(newFormData);
-  };
-
-  const moveToNextField = (currentFormData = formData) => {
-    const nextIndex = currentFieldIndex + 1;
-    if (nextIndex < allFields.length) {
-      setCurrentFieldIndex(nextIndex);
-      setCurrentPrompt(allFields[nextIndex].smart_prompt || `Please provide ${allFields[nextIndex].label || allFields[nextIndex].name}`);
-      setTranscript('');
-      playFieldSpeech(allFields[nextIndex]);
+      setIsListening(false);
     } else {
-      // Form complete - use the passed data (to avoid stale state)
-      stopListening();
-      onComplete(currentFormData);
-    }
-  };
-
-  const playFieldSpeech = async (field) => {
-    try {
-      setIsPlayingAudio(true);
-      const response = await fetch(`http://localhost:8000/speech/${field.name}`);
-      if (response.ok) {
-        const audioBlob = await response.blob();
-        const audioUrl = URL.createObjectURL(audioBlob);
-
-        if (audioRef.current) {
-          audioRef.current.src = audioUrl;
-          audioRef.current.play();
-        }
-      }
-    } catch (error) {
-      console.error('Error playing field speech:', error);
-    } finally {
-      setIsPlayingAudio(false);
-    }
-  };
-
-  const handleAudioEnded = () => {
-    setIsPlayingAudio(false);
-  };
-
-  const handleUserPause = async () => {
-    if (currentFieldIndex >= allFields.length) return;
-
-    try {
-      const response = await axios.post('http://localhost:8000/pause-suggestions', {
-        field_info: allFields[currentFieldIndex],
-        form_context: formContext
-      });
-      setSuggestions(response.data.suggestions);
-    } catch (error) {
-      setSuggestions(['Take your time. You can continue when ready.']);
-    }
-  };
-
-  const handleConfirmation = (confirmed) => {
-    if (confirmed) {
-      confirmFieldValue(transcript);
-    } else {
-      setNeedsConfirmation(false);
-      setSuggestions(['Please try again.']);
-      setTranscript('');
+      recognitionRef.current.start();
+      setIsListening(true);
     }
   };
 
   const currentField = allFields[currentFieldIndex];
-  const progress = ((currentFieldIndex + 1) / allFields.length) * 100;
+  const progressPercent = ((currentFieldIndex) / allFields.length) * 100;
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
-      <Aurora colorStops={['#bfe4be', '#69da93', '#86efac']} amplitude={1.0} blend={0.5} speed={0.4} />
-      <div className="max-w-2xl w-full p-6 bg-card/95 backdrop-blur-sm rounded-2xl shadow-2xl border border-border relative z-10">
-        <div className="mb-8">
-          <div className="flex justify-between items-center mb-3">
-            <h2 className="text-3xl md:text-4xl font-bold text-foreground tracking-tight">Voice Form Filling</h2>
-            <span className="text-base text-muted-foreground font-medium">
-              {currentFieldIndex + 1} of {allFields.length}
-            </span>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 font-sans text-white">
+
+      {/* Window Container */}
+      <div className="w-full max-w-2xl bg-black/40 border border-white/20 rounded-2xl backdrop-blur-2xl shadow-2xl relative overflow-hidden flex flex-col min-h-[600px]">
+
+        {/* Window Header */}
+        <div className="bg-white/5 p-4 flex items-center justify-between border-b border-white/10 shrink-0">
+          <div className="flex gap-2">
+            <div className="w-3 h-3 rounded-full bg-red-400/80"></div>
+            <div className="w-3 h-3 rounded-full bg-yellow-400/80"></div>
+            <div className="w-3 h-3 rounded-full bg-green-400/80"></div>
           </div>
-          <div className="w-full bg-muted rounded-full h-3">
-            <div
-              className="bg-primary h-3 rounded-full transition-all duration-300 shadow-lg"
-              style={{ width: `${progress}%` }}
-            ></div>
+          <div className="text-xs font-semibold text-white/40 flex items-center gap-2 font-mono uppercase tracking-widest">
+            voice_interface.exe
           </div>
+          <div className="w-14"></div>
         </div>
 
-        {currentField && (
-          <div className="mb-6">
-            <div className="bg-muted/50 p-6 rounded-xl mb-4 border border-border">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xl font-semibold text-foreground">{currentPrompt}</p>
-                  {currentField.required && (
-                    <p className="text-sm text-muted-foreground mt-2 font-medium">* This field is required</p>
-                  )}
-                </div>
-                <button
-                  onClick={() => playFieldSpeech(currentField)}
-                  className="p-2 text-primary hover:bg-accent rounded-full"
-                  disabled={isPlayingAudio}
-                >
-                  {isPlayingAudio ? <Pause size={20} /> : <Play size={20} />}
-                </button>
+        <div className="p-10 flex flex-col items-center justify-between flex-1 relative">
+          {/* Background Glow */}
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] bg-green-500/10 blur-[80px] rounded-full pointer-events-none" />
+
+          <div className="w-full space-y-8 relative z-10">
+            <div className="flex justify-between items-end border-b border-white/10 pb-4">
+              <div>
+                <h2 className="text-3xl font-bold tracking-tight text-white">Voice Form Filling</h2>
+                <p className="text-white/60 mt-1">Speak clearly to fill inputs</p>
               </div>
-              <audio
-                ref={audioRef}
-                onEnded={handleAudioEnded}
-                style={{ display: 'none' }}
+              <div className="text-right">
+                <div className="text-2xl font-mono font-bold text-green-400">
+                  {currentFieldIndex + 1} <span className="text-white/30 text-base">/ {allFields.length}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Progress Bar */}
+            <div className="h-1 bg-white/10 rounded-full overflow-hidden w-full">
+              <motion.div
+                className="h-full bg-green-400 shadow-[0_0_10px_rgba(74,222,128,0.5)]"
+                animate={{ width: `${progressPercent}%` }}
               />
             </div>
 
-            {/* Dropdown/Select Options Chips */}
-            {(currentField.is_dropdown || currentField.type === 'select' || currentField.type === 'dropdown' || currentField.type === 'radio') && currentField.options && currentField.options.length > 0 && (
-              <div className="bg-muted/50 p-4 rounded-xl mb-4 border border-border">
-                <p className="text-sm font-medium text-muted-foreground mb-3">
-                  Tap to select or speak your choice:
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {currentField.options.map((option, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => {
-                        const value = option.value || option.label;
-                        confirmFieldValue(value);
-                      }}
-                      disabled={option.disabled || processing}
-                      className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 border
-                      ${option.disabled
-                          ? 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
-                          : 'bg-background hover:bg-primary hover:text-primary-foreground border-border hover:border-primary shadow-sm hover:shadow-md'
-                        }
-                    `}
-                    >
-                      {option.label || option.value}
-                      {option.selected && <span className="ml-1 text-primary">✓</span>}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-xs text-muted-foreground mt-3 italic">
-                  Or use the microphone below to speak your choice
-                </p>
-              </div>
-            )}
+            {/* Previous Answer Feedback */}
+            <div className="h-8 flex justify-center items-center">
+              <AnimatePresence mode="wait">
+                {lastFilled && (
+                  <motion.div
+                    key={lastFilled.label}
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0 }}
+                    className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-green-500/10 border border-green-500/20 text-xs font-medium text-green-300"
+                  >
+                    <CheckCircle size={12} />
+                    <span>Captured: <strong className="text-white">{lastFilled.value}</strong> for {lastFilled.label}</span>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
 
-            <div className="flex items-center justify-center mb-6">
-              <button
-                onClick={isListening ? stopListening : startListening}
-                className={`p-6 rounded-full shadow-2xl ${isListening
-                  ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground'
-                  : 'bg-primary hover:bg-primary/90 text-primary-foreground'
-                  } transition-all duration-200 hover:scale-110`}
-                disabled={processing}
+            {/* Active Field Prompt */}
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={currentField?.name}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="py-2"
               >
-                {isListening ? <MicOff size={32} /> : <Mic size={32} />}
-              </button>
-            </div>
-
-            {transcript && (
-              <div className="bg-muted/50 p-4 rounded-xl mb-4 border border-border">
-                <p className="text-sm text-muted-foreground font-medium mb-1">You said:</p>
-                <p className="text-lg font-semibold text-foreground">{transcript}</p>
-              </div>
-            )}
-
-            {processing && (
-              <div className="text-center text-primary mb-4">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
-                <p className="mt-3 text-foreground font-medium text-lg">Processing your response...</p>
-              </div>
-            )}
-
-            {needsConfirmation && (
-              <div className="bg-muted/50 p-6 rounded-xl mb-4 border border-border">
-                <div className="flex items-center mb-4">
-                  <AlertCircle className="text-accent mr-2" size={24} />
-                  <p className="font-semibold text-foreground text-lg">Please confirm</p>
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-8 text-center backdrop-blur-sm min-h-[160px] flex flex-col justify-center items-center">
+                  <h3 className="text-3xl font-medium text-white mb-3 tracking-tight">
+                    {currentPrompt}
+                  </h3>
+                  <p className="text-white/40 text-sm uppercase tracking-wider font-semibold">
+                    {currentField?.label || currentField?.name} {currentField?.required && <span className="text-red-400">*</span>}
+                  </p>
                 </div>
-                <div className="flex space-x-3">
-                  <button
-                    onClick={() => handleConfirmation(true)}
-                    className="flex-1 px-6 py-3 bg-primary text-primary-foreground rounded-xl hover:bg-primary/90 font-semibold transition-all shadow-lg"
-                  >
-                    Yes, correct
-                  </button>
-                  <button
-                    onClick={() => handleConfirmation(false)}
-                    className="flex-1 px-6 py-3 bg-destructive text-destructive-foreground rounded-xl hover:bg-destructive/90 font-semibold transition-all shadow-lg"
-                  >
-                    No, try again
-                  </button>
-                </div>
-              </div>
-            )}
+              </motion.div>
+            </AnimatePresence>
 
-            {suggestions.length > 0 && !needsConfirmation && (
-              <div className="bg-muted/50 p-6 rounded-xl border border-border">
-                <p className="font-semibold text-foreground mb-3 text-lg">Helpful suggestions:</p>
-                <ul className="text-sm text-muted-foreground space-y-2">
-                  {suggestions.map((suggestion, index) => (
-                    <li key={index} className="leading-relaxed">• {suggestion}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        )}
-
-        {Object.keys(formData).length > 0 && (
-          <div className="mt-6 p-6 bg-muted/50 rounded-xl border border-border">
-            <h3 className="font-semibold mb-3 text-foreground text-lg">Collected Information:</h3>
-            <div className="space-y-1 text-sm">
-              {Object.entries(formData).map(([key, value]) => (
-                <div key={key} className="flex justify-between">
-                  <span className="text-muted-foreground">{key}:</span>
-                  <span className="font-medium text-foreground">{value}</span>
+            {/* Live Transcript Display */}
+            <div className="h-16 flex flex-col items-center justify-center space-y-2">
+              {processing ? (
+                <div className="flex items-center gap-2 text-green-400 animate-pulse bg-green-500/10 px-4 py-2 rounded-lg">
+                  <div className="w-2 h-2 rounded-full bg-green-400" />
+                  <span className="text-sm font-medium">Processing answer...</span>
                 </div>
-              ))}
+              ) : transcript ? (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="text-center"
+                >
+                  <p className="text-xs text-white/40 uppercase tracking-widest mb-1">Interpreted Voice</p>
+                  <p className="text-white text-xl font-medium px-6 py-2 bg-white/5 rounded-xl border border-white/10 shadow-inner">
+                    "{transcript}"
+                  </p>
+                </motion.div>
+              ) : (
+                <div className="flex items-center gap-2 text-white/30 italic">
+                  <div className="w-1.5 h-1.5 rounded-full bg-white/30 animate-pulse" />
+                  Listening...
+                </div>
+              )}
             </div>
           </div>
-        )}
+
+          {/* Controls */}
+          <div className="mt-8 relative z-10">
+            <button
+              onClick={toggleListening}
+              className={`w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 shadow-2xl ${isListening
+                ? 'bg-red-500/20 text-red-400 border border-red-500/50 hover:bg-red-500/30 shadow-[0_0_30px_rgba(239,68,68,0.3)]'
+                : 'bg-green-500 text-black hover:scale-105 shadow-[0_0_30px_rgba(34,197,94,0.4)]'
+                }`}
+            >
+              {isListening ? <MicOff size={32} /> : <Mic size={32} />}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

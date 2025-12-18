@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
-import { CheckCircle, Send, AlertTriangle, ExternalLink, Download } from 'lucide-react';
+import { CheckCircle, Send, AlertTriangle, ExternalLink, Download, FileText, Copy, RotateCcw } from 'lucide-react';
 import axios from 'axios';
-import Aurora from '@/components/ui/Aurora';
+import { motion } from 'framer-motion';
 
 const FormCompletion = ({ formData, formSchema, originalUrl, onReset }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionResult, setSubmissionResult] = useState(null);
-  const [showDetails, setShowDetails] = useState(false);
 
   const handleSubmitToWebsite = async () => {
     setIsSubmitting(true);
@@ -51,144 +50,138 @@ const FormCompletion = ({ formData, formSchema, originalUrl, onReset }) => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
-      <Aurora colorStops={['#1a8917', '#22c55e', '#86efac']} amplitude={1.0} blend={0.5} speed={0.4} />
-      <div className="max-w-2xl w-full p-6 bg-card/95 backdrop-blur-sm rounded-2xl shadow-2xl border border-border relative z-10">
-      <div className="text-center mb-8">
-        <CheckCircle className="mx-auto text-primary mb-6" size={64} />
-        <h2 className="text-4xl md:text-5xl font-bold text-foreground mb-4 tracking-tight">Form Completed!</h2>
-        <p className="text-lg text-muted-foreground font-medium">
-          All required information has been collected successfully.
-        </p>
-      </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 font-sans text-white">
+      <style>{`
+        .no-scrollbar::-webkit-scrollbar {
+          display: none;
+        }
+        .no-scrollbar {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+      `}</style>
 
-      {/* Form Data Summary */}
-      <div className="bg-muted/50 p-6 rounded-xl mb-6 border border-border">
-        <h3 className="text-xl font-semibold text-foreground mb-4">Collected Information:</h3>
-        <div className="space-y-2">
-          {Object.entries(formData).map(([key, value]) => (
-            <div key={key} className="flex justify-between items-center py-2 border-b border-border last:border-b-0">
-              <span className="text-muted-foreground capitalize">{key.replace(/[_-]/g, ' ')}:</span>
-              <span className="font-medium text-foreground text-right max-w-xs truncate">{value}</span>
-            </div>
-          ))}
+      {/* Window Container */}
+      <div className="w-full max-w-2xl bg-black/40 border border-white/20 rounded-2xl backdrop-blur-2xl shadow-2xl relative overflow-hidden flex flex-col max-h-[90vh]">
+
+        {/* Window Header */}
+        <div className="bg-white/5 p-4 flex items-center justify-between border-b border-white/10 shrink-0">
+          <div className="flex gap-2">
+            <div className="w-3 h-3 rounded-full bg-red-400/80"></div>
+            <div className="w-3 h-3 rounded-full bg-yellow-400/80"></div>
+            <div className="w-3 h-3 rounded-full bg-green-400/80"></div>
+          </div>
+          <div className="text-xs font-semibold text-white/40 flex items-center gap-2 font-mono uppercase tracking-widest">
+            <FileText size={12} />
+            form_submission_module.exe
+          </div>
+          <div className="w-14"></div>
         </div>
-      </div>
 
-      {/* Action Buttons */}
-      <div className="space-y-4">
-        {!submissionResult && (
-          <>
-            <button
-              onClick={handleSubmitToWebsite}
-              disabled={isSubmitting}
-              className="w-full bg-primary hover:bg-primary/90 disabled:bg-primary/50 text-primary-foreground font-semibold py-4 px-6 rounded-xl flex items-center justify-center space-x-2 transition-all shadow-lg hover:shadow-xl text-lg"
-            >
-              {isSubmitting ? (
-                <>
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary-foreground"></div>
-                  <span>Submitting to Website...</span>
-                </>
-              ) : (
-                <>
-                  <Send size={20} />
-                  <span>Submit to Original Website</span>
-                </>
-              )}
-            </button>
+        {/* Content Area */}
+        <div className="p-8 overflow-y-auto no-scrollbar">
 
-            <div className="flex space-x-3">
-              <button
-                onClick={downloadFormData}
-                className="flex-1 bg-secondary hover:bg-secondary/80 text-secondary-foreground font-medium py-3 px-4 rounded-xl flex items-center justify-center space-x-2 transition-all"
-              >
-                <Download size={20} />
-                <span>Download</span>
-              </button>
-              
-              <button
-                onClick={copyToClipboard}
-                className="flex-1 bg-secondary hover:bg-secondary/80 text-secondary-foreground font-medium py-3 px-4 rounded-xl flex items-center justify-center space-x-2 transition-all"
-              >
-                <span>Copy</span>
-              </button>
+          <div className="text-center mb-8">
+            <div className="w-20 h-20 bg-green-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-green-500/20">
+              <CheckCircle className="text-green-400" size={40} />
             </div>
-          </>
-        )}
-
-        {/* Submission Result */}
-        {submissionResult && (
-          <div className={`p-4 rounded-lg border ${
-            submissionResult.success 
-              ? 'bg-muted border-primary/20' 
-              : 'bg-muted border-destructive/20'
-          }`}>
-            <div className="flex items-center mb-2">
-              {submissionResult.success ? (
-                <CheckCircle className="text-primary mr-2" size={20} />
-              ) : (
-                <AlertTriangle className="text-destructive mr-2" size={20} />
-              )}
-              <h4 className={`font-semibold ${
-                submissionResult.success ? 'text-foreground' : 'text-destructive'
-              }`}>
-                {submissionResult.success ? 'Submission Successful!' : 'Submission Failed'}
-              </h4>
-            </div>
-            
-            <p className={`mb-3 ${
-              submissionResult.success ? 'text-foreground' : 'text-destructive'
-            }`}>
-              {submissionResult.message}
+            <h2 className="text-3xl font-bold text-white mb-2">Form Completed!</h2>
+            <p className="text-white/60">
+              All required information has been collected successfully.
             </p>
+          </div>
 
-            {submissionResult.details && (
-              <div className="mb-3">
-                <button
-                  onClick={() => setShowDetails(!showDetails)}
-                  className="text-sm text-primary hover:text-primary/80 underline"
-                >
-                  {showDetails ? 'Hide Details' : 'Show Details'}
-                </button>
-                
-                {showDetails && (
-                  <div className="mt-2 p-3 bg-background rounded border border-border text-sm">
-                    <pre className="whitespace-pre-wrap text-foreground">
-                      {JSON.stringify(submissionResult.details, null, 2)}
-                    </pre>
+          {/* Form Data Summary - Dark Glass Card */}
+          <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden mb-6">
+            <div className="px-4 py-3 bg-white/5 border-b border-white/10 flex justify-between items-center">
+              <h3 className="font-semibold text-white/80 text-sm uppercase tracking-wider">Collected Information</h3>
+              <span className="text-xs text-white/40 font-mono">{Object.keys(formData).length} fields</span>
+            </div>
+            <div className="max-h-60 overflow-y-auto p-4 space-y-3">
+              {Object.entries(formData).length > 0 ? (
+                Object.entries(formData).map(([key, value]) => (
+                  <div key={key} className="flex justify-between items-start text-sm group">
+                    <span className="text-white/50 font-mono capitalize shrink-0 pr-4 mt-0.5 group-hover:text-white/70 transition-colors">
+                      {key}:
+                    </span>
+                    <span className="font-medium text-white text-right break-words">{value}</span>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center text-white/30 italic py-4">No data collected</div>
+              )}
+            </div>
+          </div>
+
+          {/* Submission Result - Alerts */}
+          {submissionResult && (
+            <div className={`p-4 rounded-xl mb-6 border flex gap-3 text-sm ${submissionResult.success || (submissionResult.message && !submissionResult.error)
+              ? 'bg-green-500/10 border-green-500/20 text-green-200'
+              : 'bg-red-500/10 border-red-500/20 text-red-200'
+              }`}>
+              {submissionResult.success ? <CheckCircle size={18} /> : <AlertTriangle size={18} />}
+              <div>
+                <strong>{submissionResult.success ? 'Success' : 'Submission Alert'}: </strong>
+                {submissionResult.message}
+                {submissionResult.error && (
+                  <div className="mt-1 opacity-80 text-xs font-mono bg-black/20 p-2 rounded">
+                    {JSON.stringify(submissionResult.error)}
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="space-y-3">
+            {!submissionResult && (
+              <button
+                onClick={handleSubmitToWebsite}
+                disabled={isSubmitting}
+                className="w-full bg-green-500 hover:bg-green-400 text-black font-bold py-4 px-6 rounded-xl flex items-center justify-center space-x-2 transition-all shadow-[0_0_20px_rgba(34,197,94,0.3)] hover:shadow-[0_0_30px_rgba(34,197,94,0.5)] disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSubmitting ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-black"></div>
+                    <span>Submitting to Website...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send size={20} />
+                    <span>Submit to Original Website</span>
+                  </>
+                )}
+              </button>
             )}
 
-            {submissionResult.success && (
-              <div className="flex items-center space-x-2 text-sm text-foreground">
-                <ExternalLink size={16} />
-                <span>Your form has been submitted to the original website</span>
-              </div>
-            )}
+            <div className="flex gap-3">
+              <button
+                onClick={downloadFormData}
+                className="flex-1 bg-white/5 hover:bg-white/10 text-white border border-white/10 font-medium py-3 px-4 rounded-xl flex items-center justify-center space-x-2 transition-all"
+              >
+                <Download size={18} />
+                <span>Download</span>
+              </button>
+
+              <button
+                onClick={copyToClipboard}
+                className="flex-1 bg-white/5 hover:bg-white/10 text-white border border-white/10 font-medium py-3 px-4 rounded-xl flex items-center justify-center space-x-2 transition-all"
+              >
+                <Copy size={18} />
+                <span>Copy</span>
+              </button>
+            </div>
+
+            <button
+              onClick={onReset}
+              className="w-full text-white/40 hover:text-white text-sm py-2 transition-colors flex items-center justify-center gap-2"
+            >
+              <RotateCcw size={14} />
+              Start New Form
+            </button>
+
           </div>
-        )}
-
-        {/* Reset Button */}
-        <button
-          onClick={onReset}
-          className="w-full bg-secondary hover:bg-secondary/80 text-secondary-foreground font-medium py-3 px-4 rounded-xl transition-all"
-        >
-          Start New Form
-        </button>
-      </div>
-
-      {/* Additional Information */}
-      <div className="mt-6 p-6 bg-muted/50 rounded-xl border border-border">
-        <h4 className="text-lg font-semibold text-foreground mb-3">What happens next?</h4>
-        <ul className="text-sm text-muted-foreground space-y-2">
-          <li>• Your form data is automatically filled into the original website</li>
-          <li>• The form is submitted using secure browser automation</li>
-          <li>• You'll receive confirmation of successful submission</li>
-          <li>• No personal data is stored on our servers</li>
-        </ul>
-      </div>
+        </div>
       </div>
     </div>
   );
