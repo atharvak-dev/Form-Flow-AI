@@ -201,14 +201,15 @@ class FormSchema:
         self.fields = {f.name: f for f in fields}
     
     def validate_all(self, data: Dict[str, str]) -> Tuple[bool, List[str]]:
-        """Validate all fields in the data"""
+        """Validate only fields present in user data"""
         errors = []
         
-        for field_name, field_convention in self.fields.items():
-            value = data.get(field_name, "")
-            valid, error = field_convention.validate(value)
-            if not valid:
-                errors.append(error)
+        for field_name, value in data.items():
+            if field_name in self.fields:
+                field_convention = self.fields[field_name]
+                valid, error = field_convention.validate(value)
+                if not valid:
+                    errors.append(error)
         
         return len(errors) == 0, errors
     
@@ -336,7 +337,7 @@ def build_form_schema(form_data: Any) -> FormSchema:
         # Build field conventions from all forms
         for form in form_data:
             for field_info in form.get('fields', []):
-                if field_info.get('type') not in ['submit', 'button', 'reset', 'image']:
+                if field_info.get('type') not in ['submit', 'button', 'reset', 'image', 'hidden']:
                     convention = build_field_convention(field_info)
                     fields.append(convention)
     else:
@@ -345,7 +346,7 @@ def build_form_schema(form_data: Any) -> FormSchema:
         fields = []
         
         for field_info in form_data.get('fields', []):
-            if field_info.get('type') not in ['submit', 'button', 'reset', 'image']:
+            if field_info.get('type') not in ['submit', 'button', 'reset', 'image', 'hidden']:
                 convention = build_field_convention(field_info)
                 fields.append(convention)
     

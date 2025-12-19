@@ -117,9 +117,17 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
+from sqlalchemy.orm import selectinload
+
 @app.get("/users/me", response_model=schemas.UserResponse)
-async def read_users_me(current_user: models.User = Depends(auth.get_current_user)):
-    return current_user
+async def read_users_me(current_user: models.User = Depends(auth.get_current_user), db: AsyncSession = Depends(database.get_db)):
+    # Re-fetch user with submissions eagerly loaded
+    result = await db.execute(
+        select(models.User)
+        .options(selectinload(models.User.submissions))
+        .filter(models.User.id == current_user.id)
+    )
+    return result.scalars().first()
 
 @app.get("/history", response_model=List[schemas.FormSubmissionResponse])
 async def get_history(current_user: models.User = Depends(auth.get_current_user), db: AsyncSession = Depends(database.get_db)):
@@ -227,7 +235,7 @@ async def scrape_form(data: ScrapeRequest):
         response_data = {
             "message": "Form scraped and analyzed successfully",
             "form_schema": enhanced_schema,
-            "form_template": template,
+            "form_template": create_template(form_schema),
             "form_context": form_context,
             "speech_available": len(speech_data) > 0,
             "speech_fields": list(speech_data.keys()),
@@ -541,7 +549,7 @@ async def submit_form(
             print(f"⚠️ History tracking error: {e}")
 
         return {
-            "message": "Form submission completed",
+            "message": result.get("message", "Form submission completed"),
             "success": result["success"],
             "details": result,
             "submitted_data": formatted_data

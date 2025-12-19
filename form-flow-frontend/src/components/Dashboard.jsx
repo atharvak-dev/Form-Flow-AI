@@ -22,20 +22,25 @@ export function Dashboard() {
         }
 
         try {
-            // Fetch User Info
+            // Fetch User Info (includes submissions now)
             const userRes = await axios.get("http://localhost:8000/users/me", {
                 headers: { Authorization: `Bearer ${token}` }
             })
             setUser(userRes.data)
 
-            // Fetch History
-            const histRes = await axios.get("http://localhost:8000/history", {
-                headers: { Authorization: `Bearer ${token}` }
-            })
-            setHistory(histRes.data)
+            // Use submissions from user profile if available, otherwise default to empty
+            if (userRes.data.submissions) {
+                // Sort by ID descending (newest first) since timestamp might be same string
+                const sorted = [...userRes.data.submissions].sort((a, b) => b.id - a.id);
+                setHistory(sorted);
+            }
         } catch (err) {
-            localStorage.removeItem('token')
-            window.location.href = '/login'
+            console.error("Dashboard fetch error:", err);
+            // Only logout on auth error
+            if (err.response && err.response.status === 401) {
+                localStorage.removeItem('token')
+                window.location.href = '/login'
+            }
         } finally {
             setLoading(false)
         }

@@ -19,9 +19,21 @@ class UserLogin(BaseModel):
     email: EmailStr
     password: str
 
+from typing import List
+
+class FormSubmissionResponse(BaseModel):
+    id: int
+    form_url: str
+    status: str
+    timestamp: datetime
+
+    class Config:
+        from_attributes = True
+
 class UserResponse(UserBase):
     id: int
     created_at: datetime
+    submissions: List[FormSubmissionResponse] = []
     
     class Config:
         from_attributes = True
@@ -32,12 +44,3 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     email: Optional[str] = None
-
-class FormSubmissionResponse(BaseModel):
-    id: int
-    form_url: str
-    status: str
-    timestamp: datetime
-
-    class Config:
-        from_attributes = True

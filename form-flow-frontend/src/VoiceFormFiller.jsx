@@ -29,20 +29,31 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
   const [lastFilled, setLastFilled] = useState(null); // Track last answer
 
   // Field name mappings for auto-fill (form field names -> user profile keys)
+  // ORDER MATTERS: Specific patterns first, generic patterns last.
   const fieldMappings = {
-    // Name fields
+    // 1. Explicit Full Name (High priority)
+    'fullname': 'fullname', 'full_name': 'fullname', 'yourname': 'fullname',
+
+    // 2. Specific Name Parts
     'first_name': 'first_name', 'firstname': 'first_name', 'fname': 'first_name', 'given_name': 'first_name',
     'last_name': 'last_name', 'lastname': 'last_name', 'lname': 'last_name', 'surname': 'last_name', 'family_name': 'last_name',
-    // Email fields
+
+    // 3. Contact Info
     'email': 'email', 'mail': 'email', 'e_mail': 'email', 'emailid': 'email', 'email_id': 'email',
-    // Phone fields
-    'mobile': 'mobile', 'phone': 'mobile', 'telephone': 'mobile', 'cell': 'mobile', 'contact': 'mobile',
-    'mobile_number': 'mobile', 'phone_number': 'mobile',
-    // Location fields
-    'country': 'country', 'nation': 'country',
+    'elecadr': 'email', 'nelecadr': 'email', 'emailaddress': 'email', 'email_address': 'email',
+
+    'mobile': 'mobile', 'phone': 'mobile', 'telephone': 'mobile', 'cell': 'mobile', // Removed 'contact' as it matches 'Contact Message'
+    'mobile_number': 'mobile', 'phone_number': 'mobile', 'nphone': 'mobile', 'phonenumber': 'mobile',
+    'tel': 'mobile', 'cellphone': 'mobile', 'mobilephone': 'mobile',
+
+    // 4. Location
+    'country': 'country', // Removed 'nation' as it matches 'designation', 'destination', etc.
     'state': 'state', 'province': 'state', 'region': 'state',
     'city': 'city', 'town': 'city',
     'pincode': 'pincode', 'zip': 'pincode', 'zipcode': 'pincode', 'postal_code': 'pincode', 'postalcode': 'pincode',
+
+    // 5. Generic Name (Lowest priority - fallback)
+    'name': 'fullname',
   };
 
 
@@ -121,16 +132,29 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
 
     const autoFilled = {};
 
+    // Create fullname from first_name + last_name
+    const fullName = [userProfile.first_name, userProfile.last_name].filter(Boolean).join(' ');
+    const profileWithFullName = { ...userProfile, fullname: fullName || null };
+
     allFields.forEach(field => {
       const fieldNameLower = field.name.toLowerCase().replace(/[-_\s]/g, '');
       const labelLower = (field.label || '').toLowerCase().replace(/[-_\s]/g, '');
+
+      // Keywords to strictly exclude from name/personal auto-fill
+      const EXCLUDE_KEYWORDS = ['university', 'college', 'school', 'institution', 'institute', 'company', 'organization', 'project', 'product', 'item', 'group'];
+
+      const isExcluded = EXCLUDE_KEYWORDS.some(kw =>
+        (fieldNameLower.includes(kw) || labelLower.includes(kw))
+      );
+
+      if (isExcluded) return; // Skip this field
 
       // Check if this field matches any user profile field
       for (const [pattern, profileKey] of Object.entries(fieldMappings)) {
         const patternClean = pattern.replace(/[-_\s]/g, '');
 
         if (fieldNameLower.includes(patternClean) || labelLower.includes(patternClean)) {
-          const profileValue = userProfile[profileKey];
+          const profileValue = profileWithFullName[profileKey];
           if (profileValue) {
             autoFilled[field.name] = profileValue;
             console.log(`✅ Auto-filled '${field.name}' with '${profileValue}' from '${profileKey}'`);
@@ -282,6 +306,16 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
     }
   };
 
+  // Skip current field (only for non-required fields)
+  const handleSkipField = () => {
+    const field = allFields[currentFieldIndex];
+    if (field && !field.required) {
+      console.log(`⏭️ User skipped optional field: ${field.name}`);
+      setLastFilled({ label: field.label || field.name, value: '(skipped)', skipped: true });
+      handleNextField(currentFieldIndex);
+    }
+  };
+
   const currentField = allFields[currentFieldIndex];
   const progressPercent = ((currentFieldIndex) / allFields.length) * 100;
 
@@ -342,7 +376,7 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
                   >
                     <CheckCircle size={12} />
                     <span>
-                      {lastFilled.auto ? '🤖 Auto-filled: ' : 'Captured: '}
+                      {lastFilled.auto ? '🤖 Auto-filled: ' : lastFilled.skipped ? '⏭️ Skipped: ' : 'Captured: '}
                       <strong className="text-white">{lastFilled.value}</strong> for {lastFilled.label}
                     </span>
                   </motion.div>
@@ -407,7 +441,17 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
           </div>
 
           {/* Controls */}
-          <div className="mt-8 relative z-10">
+          <div className="mt-8 relative z-10 flex items-center gap-4">
+            {/* Skip Button - only show for non-required fields */}
+            {currentField && !currentField.required && (
+              <button
+                onClick={handleSkipField}
+                className="px-4 py-2 rounded-full text-sm font-medium bg-white/5 border border-white/20 text-white/60 hover:bg-white/10 hover:text-white transition-all"
+              >
+                Skip
+              </button>
+            )}
+
             <button
               onClick={toggleListening}
               className={`w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 shadow-2xl ${isListening
@@ -417,6 +461,9 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete }) => {
             >
               {isListening ? <MicOff size={32} /> : <Mic size={32} />}
             </button>
+
+            {/* Spacer for symmetry when skip button is shown */}
+            {currentField && !currentField.required && <div className="w-16" />}
           </div>
         </div>
       </div>

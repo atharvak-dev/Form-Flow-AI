@@ -393,7 +393,32 @@ def _process_forms(forms_data: List[Dict]) -> List[Dict]:
     """Process and enrich extracted forms with additional metadata."""
     result = []
     
+    # Keywords indicating a form should be excluded (search/nav forms)
+    EXCLUDE_KEYWORDS = ['search', 'login', 'signin', 'sign-in', 'newsletter', 'subscribe']
+    
     for form in forms_data:
+        # Skip forms that look like search/navigation forms
+        form_id = (form.get("id") or "").lower()
+        form_name = (form.get("name") or "").lower()
+        form_action = (form.get("action") or "").lower()
+        
+        # Check if form ID/name/action contains exclude keywords
+        combined = f"{form_id} {form_name} {form_action}"
+        if any(kw in combined for kw in EXCLUDE_KEYWORDS):
+            print(f"⏭️ Skipping excluded form: {form_id or form_name or form_action}")
+            continue
+        
+        # Filter out hidden fields and get visible field count
+        visible_fields = [f for f in form.get("fields", []) if not f.get("hidden") and f.get("type") != "hidden"]
+        
+        # Skip forms with only 1-2 visible fields (likely search/nav forms)
+        if len(visible_fields) < 3:
+            field_names = [f.get("name", "") for f in visible_fields]
+            # Unless it's specifically a contact/feedback form with few fields
+            if not any(kw in str(field_names).lower() for kw in ['message', 'comment', 'feedback', 'contact']):
+                print(f"⏭️ Skipping small form with {len(visible_fields)} visible field(s)")
+                continue
+        
         processed = {
             "formIndex": form.get("formIndex"),
             "action": form.get("action"),
@@ -407,6 +432,11 @@ def _process_forms(forms_data: List[Dict]) -> List[Dict]:
         
         for field in form.get("fields", []):
             field_type = field.get("type", "text")
+            
+            # Skip hidden fields entirely
+            if field.get("hidden") or field_type == "hidden":
+                continue
+                
             enriched = {
                 **field,
                 "display_name": _generate_display_name(field),
@@ -417,7 +447,8 @@ def _process_forms(forms_data: List[Dict]) -> List[Dict]:
             }
             processed["fields"].append(enriched)
         
-        result.append(processed)
+        if processed["fields"]:  # Only add if has visible fields
+            result.append(processed)
     
     return result
 
