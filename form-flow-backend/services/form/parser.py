@@ -117,11 +117,29 @@ async def get_form_schema(url: str, generate_speech_audio: bool = True, wait_for
         ) as context:
             page = await context.new_page()
             
-            # Set up resource blocking for this page
-            await page.route("**/*", lambda r: r.abort() if r.request.resource_type in {"media", "font"} else r.continue_())
+            # Redundant if handled by browser_pool, but keeping safe default
+            # await page.route("**/*", lambda r: r.abort() if r.request.resource_type in {"media", "font"} else r.continue_())
             
             print(f"🔗 Navigating to {'Google Form' if is_google_form else 'page'}...")
-            await page.goto(url, wait_until="domcontentloaded", timeout=120000)
+            
+            # Retry logic for navigation specifically to handle TargetClosedError
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                    break
+                except Exception as e:
+                    if "TargetClosedError" in str(e) and attempt < max_retries - 1:
+                        print(f"⚠️ Navigation failed (Attempt {attempt+1}/{max_retries}), retrying...")
+                        await asyncio.sleep(2)
+                        # Re-create page if it was closed
+                        try:
+                            if page.is_closed():
+                                page = await context.new_page()
+                        except:
+                            page = await context.new_page()
+                    else:
+                        raise e
             
             # ================================================================
             # PHASE 0: Pre-flight checks (Parallelized for speed)

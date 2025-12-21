@@ -60,12 +60,14 @@ def _get_semaphore() -> asyncio.Semaphore:
 
 # Default browser args optimized for low-memory servers
 BROWSER_ARGS = [
+    # Core Stability Flags
     '--no-sandbox',
     '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage',  # Prevents crashes in Docker
+    '--disable-dev-shm-usage',
     '--disable-gpu',
-    '--single-process',  # Reduces memory
     '--no-zygote',
+    
+    # Process & Networking Management
     '--disable-background-networking',
     '--disable-default-apps',
     '--disable-extensions',
@@ -73,9 +75,15 @@ BROWSER_ARGS = [
     '--disable-translate',
     '--mute-audio',
     '--no-first-run',
+    
+    # Background Throttling
     '--disable-background-timer-throttling',
     '--disable-backgrounding-occluded-windows',
     '--disable-renderer-backgrounding',
+    
+    # Hardware Compatibility (Fix for crashing on older/virtual hardware)
+    '--disable-software-rasterizer',
+    '--disable-gl-drawing-for-tests',
 ]
 
 
@@ -178,11 +186,9 @@ async def get_browser_context(
         if stealth_script:
             await context.add_init_script(stealth_script)
         
-        # Create page and set up resource blocking if needed
-        page = None
+        # Set up resource blocking at context level
         if block_resources:
-            page = await context.new_page()
-            await page.route(
+            await context.route(
                 "**/*", 
                 lambda route: route.abort() if route.request.resource_type in set(block_resources) else route.continue_()
             )
