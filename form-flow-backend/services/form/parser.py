@@ -190,6 +190,23 @@ async def get_form_schema(url: str, generate_speech_audio: bool = True, wait_for
                 
                 # OPTIMIZATION: Only scroll if few inputs are visible
                 visible_inputs = await page.evaluate("() => document.querySelectorAll('input:not([type=\"hidden\"]), select, textarea').length")
+                
+                # RETRY STRATEGY: If page looks empty, it might be slow to hydrate (React/Angular)
+                if visible_inputs == 0:
+                    print("⚠️ No inputs found initially. Waiting for network idle...")
+                    try:
+                        # Give it a real chance to finish network requests
+                        await page.wait_for_load_state("networkidle", timeout=6000)
+                    except:
+                        pass # Network idle timeout is fine, we just proceed
+                    
+                    # Hard sleep for hydration animations
+                    await asyncio.sleep(2)
+                    
+                    # Re-check
+                    visible_inputs = await page.evaluate("() => document.querySelectorAll('input:not([type=\"hidden\"]), select, textarea').length")
+                    print(f"🔄 Re-scan found {visible_inputs} inputs")
+
                 if visible_inputs < 5:
                     print("📜 Few inputs found, scrolling to load lazy content...")
                     new_fields = await scroll_and_detect_lazy_fields(page)
