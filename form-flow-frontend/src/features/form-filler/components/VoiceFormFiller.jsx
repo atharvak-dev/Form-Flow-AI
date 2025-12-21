@@ -221,6 +221,22 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
     return (
         // OVERLAY: Completely clear (bg-black/20 for slight dim, NO BLUR)
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/20 font-sans">
+            <style jsx>{`
+                .custom-scrollbar::-webkit-scrollbar {
+                    width: 6px;
+                }
+                .custom-scrollbar::-webkit-scrollbar-track {
+                    background: rgba(255, 255, 255, 0.02);
+                    border-radius: 4px;
+                }
+                .custom-scrollbar::-webkit-scrollbar-thumb {
+                    background: rgba(255, 255, 255, 0.15);
+                    border-radius: 4px;
+                }
+                .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+                    background: rgba(255, 255, 255, 0.3);
+                }
+            `}</style>
 
             {/* WINDOW: TerminalLoader Style (bg-black/40 + backdrop-blur-2xl) */}
             <div className="w-full max-w-5xl h-[650px] bg-black/40 backdrop-blur-2xl rounded-2xl border border-white/20 shadow-2xl flex flex-col overflow-hidden relative ring-1 ring-white/5">
@@ -305,79 +321,162 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
                             </button>
                         </div>
 
-                        <div className="flex-1 flex flex-col justify-center items-center w-full max-w-lg mx-auto space-y-8">
+                        <div className="flex-1 flex flex-col justify-center items-center w-full max-w-lg mx-auto relative h-full py-4">
 
-                            {/* Visualizer Area */}
-                            <div className="h-48 w-full flex items-center justify-center relative">
-                                {!showTextInput && (
-                                    <div className="absolute inset-0 flex items-center justify-center">
-                                        <SiriWave
-                                            theme="ios9"
-                                            isActive={isListening}
-                                            volumeLevel={volumeLevel}
-                                            status={processing ? 'processing' : isListening ? 'listening' : 'idle'}
-                                            size="xl"
-                                            color="#10b981"
-                                        />
-                                    </div>
-                                )}
-
-                                {transcript && !showTextInput && (
-                                    <motion.div
-                                        initial={{ opacity: 0, scale: 0.9 }}
-                                        animate={{ opacity: 1, scale: 1 }}
-                                        className="relative z-10 text-center bg-black/50 backdrop-blur-xl px-6 py-4 rounded-2xl border border-white/10 max-w-full shadow-xl"
-                                    >
-                                        <p className="text-2xl font-medium text-white drop-shadow-md">"{transcript}"</p>
-                                    </motion.div>
-                                )}
-                            </div>
-
-                            {/* Input Methods */}
+                            {/* CASE A: OPTIONS SELECTION */}
                             {currentField.options?.length > 0 ? (
-                                <div className="w-full grid grid-cols-1 gap-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-                                    {currentField.options.map((opt, idx) => {
-                                        const val = opt.value || opt.label;
-                                        const label = opt.label || val;
-                                        const selected = formData[currentField.name] === val;
-                                        return (
-                                            <button
-                                                key={idx}
-                                                onClick={() => { updateField(currentField, val); handleNext(currentFieldIndex); }}
-                                                className={`group flex items-center justify-between p-4 rounded-xl border text-left transition-all backdrop-blur-sm
-                                                    ${selected
-                                                        ? 'bg-emerald-500/20 border-emerald-500/50 text-white shadow-[0_0_15px_rgba(16,185,129,0.2)]'
-                                                        : 'bg-white/5 border-white/5 text-white/60 hover:bg-white/10 hover:border-white/10 hover:text-white'
-                                                    }`}
-                                            >
-                                                <div className="flex items-center gap-4">
-                                                    <span className={`flex items-center justify-center w-6 h-6 rounded border text-xs font-mono transition-colors
-                                                        ${selected ? 'border-emerald-500/50 text-emerald-400' : 'border-white/10 text-white/20 group-hover:border-white/30'}`}>
-                                                        {idx + 1}
-                                                    </span>
-                                                    <span className="font-medium text-lg drop-shadow-sm">{label}</span>
-                                                </div>
-                                                {selected && <CheckCircle size={20} className="text-emerald-400" />}
-                                            </button>
-                                        )
-                                    })}
+                                <div className="w-full flex flex-col gap-4 h-full">
+                                    <div className="flex items-center justify-between mb-2 px-2">
+                                        <span className="text-white/40 text-sm font-mono uppercase tracking-widest">Select an option</span>
+                                        {isListening && (
+                                            <div className="flex items-center gap-2 text-emerald-400 text-xs animate-pulse">
+                                                <Mic size={12} /> Listening...
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="w-full grid grid-cols-1 gap-3 overflow-y-auto pr-2 custom-scrollbar flex-1 max-h-[450px]">
+                                        {currentField.options.map((opt, idx) => {
+                                            const val = opt.value || opt.label;
+                                            const label = opt.label || val;
+                                            const selected = formData[currentField.name] === val;
+                                            return (
+                                                <button
+                                                    key={idx}
+                                                    onClick={() => { updateField(currentField, val); handleNext(currentFieldIndex); }}
+                                                    className={`group flex items-center justify-between p-4 rounded-xl border text-left transition-all backdrop-blur-sm shrink-0
+                                                        ${selected
+                                                            ? 'bg-emerald-500/20 border-emerald-500/50 text-white shadow-[0_0_15px_rgba(16,185,129,0.2)]'
+                                                            : 'bg-white/5 border-white/5 text-white/60 hover:bg-white/10 hover:border-white/10 hover:text-white'
+                                                        }`}
+                                                >
+                                                    <div className="flex items-center gap-4">
+                                                        <span className={`flex items-center justify-center w-6 h-6 rounded border text-xs font-mono transition-colors
+                                                            ${selected ? 'border-emerald-500/50 text-emerald-400' : 'border-white/10 text-white/20 group-hover:border-white/30'}`}>
+                                                            {idx + 1}
+                                                        </span>
+                                                        <span className="font-medium text-lg drop-shadow-sm">{label}</span>
+                                                    </div>
+                                                    {selected && <CheckCircle size={20} className="text-emerald-400" />}
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+
+                                    {/* Mic Toggle for Options (Small) */}
+                                    <button
+                                        onClick={toggleListening}
+                                        className="self-center mt-2 p-3 rounded-full bg-white/5 text-white/20 hover:text-emerald-400 hover:bg-white/10 transition-all"
+                                        title="Toggle Voice Selection"
+                                    >
+                                        {isListening ? <Mic size={20} className="animate-pulse text-emerald-400" /> : <MicOff size={20} />}
+                                    </button>
                                 </div>
                             ) : (
-                                <div className="w-full space-y-6">
-                                    {!showTextInput ? (
-                                        <div className="flex flex-col items-center gap-4">
+                                /* CASE B: TEXT / VOICE INPUT (Siri Orb) */
+                                <div className="flex-1 w-full flex flex-col items-center justify-center relative min-h-[300px]">
+                                    {!showTextInput && (
+                                        <div className="flex flex-col items-center justify-center gap-6 relative z-10 w-full">
+
+                                            {/* SIRI ORB */}
                                             <button
                                                 onClick={toggleListening}
-                                                className={`w-20 h-20 rounded-full flex items-center justify-center transition-all bg-emerald-500 hover:bg-emerald-400 text-black shadow-[0_0_40px_rgba(16,185,129,0.3)] hover:shadow-[0_0_60px_rgba(16,185,129,0.5)] border border-emerald-400/50 ${isListening ? 'animate-pulse' : ''}`}
+                                                className="relative group cursor-pointer focus:outline-none transition-transform active:scale-95"
                                             >
-                                                {isListening ? <MicOff size={32} /> : <Mic size={32} />}
+                                                <div className="relative w-28 h-28 flex items-center justify-center">
+                                                    <motion.div
+                                                        animate={
+                                                            processing ? { scale: [1, 1.1, 1], rotate: 360 } :
+                                                                isListening ? { scale: [1, 1.2 + (volumeLevel || 0), 1] } :
+                                                                    { scale: [1, 1.05, 1] }
+                                                        }
+                                                        transition={
+                                                            processing ? { duration: 2, repeat: Infinity, ease: "linear" } :
+                                                                isListening ? { duration: 0.2, ease: "easeInOut" } :
+                                                                    { duration: 2, repeat: Infinity, ease: "easeInOut" }
+                                                        }
+                                                        className={`w-20 h-20 rounded-full blur-md transition-all duration-500
+                                                            ${isListening
+                                                                ? 'bg-gradient-to-br from-cyan-400 via-emerald-400 to-purple-500 shadow-[0_0_80px_rgba(52,211,153,0.5)]'
+                                                                : 'bg-white/10 border border-white/10 shadow-[0_0_30px_rgba(255,255,255,0.05)]'
+                                                            }`}
+                                                    />
+
+                                                    {isListening && (
+                                                        <>
+                                                            <motion.div
+                                                                animate={{ scale: [1, 2.2], opacity: [0.4, 0] }}
+                                                                transition={{ duration: 2, repeat: Infinity, ease: "easeOut" }}
+                                                                className="absolute inset-0 rounded-full border border-emerald-500/20"
+                                                            />
+                                                            <motion.div
+                                                                animate={{ scale: [1, 1.6], opacity: [0.3, 0] }}
+                                                                transition={{ duration: 2, repeat: Infinity, ease: "easeOut", delay: 0.5 }}
+                                                                className="absolute inset-0 rounded-full border border-cyan-400/20"
+                                                            />
+                                                        </>
+                                                    )}
+
+                                                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                                        {isListening ? (
+                                                            <Mic size={28} className="text-white drop-shadow-md" />
+                                                        ) : (
+                                                            <MicOff size={28} className="text-white/40" />
+                                                        )}
+                                                    </div>
+                                                </div>
                                             </button>
-                                            <p className="text-white/40 font-mono text-sm uppercase tracking-widest text-shadow">
-                                                {isListening ? 'Listening...' : 'Tap to Speak'}
-                                            </p>
+
+                                            {/* Status */}
+                                            <div className="h-6 flex items-center justify-center">
+                                                {processing ? (
+                                                    <span className="text-xs font-mono text-emerald-400 animate-pulse flex items-center gap-2">
+                                                        <Sparkles size={12} /> PROCESSING...
+                                                    </span>
+                                                ) : isListening ? (
+                                                    <span className="text-xs font-mono text-cyan-400 animate-pulse">
+                                                        LISTENING...
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-xs font-mono text-white/30 uppercase tracking-widest">
+                                                        Tap Orb to Speak
+                                                    </span>
+                                                )}
+                                            </div>
+
+                                            {/* Transcript (Resizable & Scrollable) */}
+                                            <div className="w-full flex justify-center px-4">
+                                                <AnimatePresence mode='wait'>
+                                                    {transcript && (
+                                                        <motion.div
+                                                            key="transcript"
+                                                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                                                            exit={{ opacity: 0, scale: 0.9 }}
+                                                            className="bg-white/5 backdrop-blur-md border border-white/10 px-6 py-4 rounded-2xl w-full shadow-xl text-center max-h-[160px] overflow-y-auto custom-scrollbar"
+                                                        >
+                                                            <p className="text-xl font-light text-white leading-relaxed break-words">
+                                                                "{transcript}"
+                                                            </p>
+                                                        </motion.div>
+                                                    )}
+                                                </AnimatePresence>
+                                            </div>
                                         </div>
-                                    ) : (
-                                        <div className="w-full relative">
+                                    )}
+
+                                    {/* Fallback to Keyboard */}
+                                    {!showTextInput && (
+                                        <button
+                                            onClick={() => setShowTextInput(true)}
+                                            className="absolute bottom-0 w-full flex justify-center py-4 text-white/30 hover:text-white/60 text-xs font-mono border-t border-transparent hover:border-white/5 transition-all gap-2 items-center tracking-widest uppercase"
+                                        >
+                                            <Keyboard size={12} /> Switch to Keyboard
+                                        </button>
+                                    )}
+
+                                    {showTextInput && (
+                                        <div className="w-full relative animate-in fade-in slide-in-from-bottom-4 duration-300">
                                             <input
                                                 autoFocus
                                                 type="text"
@@ -393,16 +492,15 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
                                             >
                                                 <Send size={18} />
                                             </button>
+
+                                            <button
+                                                onClick={() => setShowTextInput(false)}
+                                                className="w-full flex justify-center py-2 mt-2 text-white/30 hover:text-white/60 text-sm transition-colors gap-2 items-center"
+                                            >
+                                                <Mic size={14} /> Switch back to Voice
+                                            </button>
                                         </div>
                                     )}
-
-                                    <button
-                                        onClick={() => setShowTextInput(!showTextInput)}
-                                        className="w-full flex justify-center py-2 text-white/30 hover:text-white/60 text-sm transition-colors gap-2 items-center hover:bg-white/5 rounded-lg"
-                                    >
-                                        <Keyboard size={14} />
-                                        {showTextInput ? "Switch to Voice" : "Switch to Keyboard"}
-                                    </button>
                                 </div>
                             )}
                         </div>
