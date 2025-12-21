@@ -58,7 +58,7 @@ async def _process_scraped_form(
     """Shared helper to scrape and prepare form data"""
     
     # Get form schema
-    result = await get_form_schema(url, generate_speech_audio=False)
+    result = await get_form_schema(url, generate_speech=False)
     form_schema = result['forms']
     
     # Generate speech

@@ -159,7 +159,6 @@ STANDARD_FORMS_JS = '''
         return name.replace(/[_-]/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/\\[\\]/g, '').trim();
     };
 
-    
     return Array.from(document.querySelectorAll('form')).map((form, idx) => {
         const fields = [];
         const processedRadioGroups = new Set();
@@ -252,7 +251,13 @@ STANDARD_FORMS_JS = '''
             
             if (!name || type === 'submit' || type === 'button' || type === 'hidden') return;
             if (skippedCustomDropdownInputs.has(name)) return;
-            if (field.closest('.ant-select, .select2-container, .choices, [class*="select-"][class*="container"]')) return;
+            
+            // Only skip internal search inputs inside custom select components
+            // Don't skip regular text/email/tel inputs that might be siblings
+            if (type === 'search' && field.closest('.ant-select, .select2-container, .choices, [class*="select-"][class*="container"]')) {
+                // This is the internal search box of a custom dropdown - skip it
+                return;
+            }
             
             // RADIO BUTTONS
             if (type === 'radio') {

@@ -2,15 +2,130 @@
 Constants for form parsing - centralized selectors and patterns.
 """
 
-# Browser stealth configuration
+# Advanced anti-detection script to bypass modern bot protection
 STEALTH_SCRIPT = """
-Object.defineProperty(navigator, 'webdriver', { get: () => false });
-Object.defineProperty(navigator, 'plugins', { get: () => [
-    {name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer'},
-    {name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai'}
-]});
-Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-window.chrome = { runtime: {}, loadTimes: () => {}, csi: () => {}, app: {} };
+// 1. Pass the WebDriver check
+Object.defineProperty(navigator, 'webdriver', {
+    get: () => undefined
+});
+
+// 2. Mock Chrome runtime
+window.chrome = {
+    runtime: {
+        PlatformOs: {
+            MAC: 'mac',
+            WIN: 'win',
+            ANDROID: 'android',
+            CROS: 'cros',
+            LINUX: 'linux',
+            OPENBSD: 'openbsd'
+        },
+        PlatformArch: {
+            ARM: 'arm',
+            X86_32: 'x86-32',
+            X86_64: 'x86-64',
+            MIPS: 'mips',
+            MIPS64: 'mips64'
+        },
+        PlatformNaclArch: {
+            ARM: 'arm',
+            X86_32: 'x86-32',
+            X86_64: 'x86-64',
+            MIPS: 'mips',
+            MIPS64: 'mips64'
+        },
+        RequestUpdateCheckStatus: {
+            THROTTLED: 'throttled',
+            NO_UPDATE: 'no_update',
+            UPDATE_AVAILABLE: 'update_available'
+        },
+        OnInstalledReason: {
+            INSTALL: 'install',
+            UPDATE: 'update',
+            CHROME_UPDATE: 'chrome_update',
+            SHARED_MODULE_UPDATE: 'shared_module_update'
+        },
+        OnRestartRequiredReason: {
+            APP_UPDATE: 'app_update',
+            OS_UPDATE: 'os_update',
+            PERIODIC: 'periodic'
+        }
+    },
+    app: {
+        isInstalled: false,
+        InstallState: {
+            DISABLED: 'disabled',
+            INSTALLED: 'installed',
+            NOT_INSTALLED: 'not_installed'
+        },
+        RunningState: {
+            CANNOT_RUN: 'cannot_run',
+            READY_TO_RUN: 'ready_to_run',
+            RUNNING: 'running'
+        }
+    },
+    csi: () => {},
+    loadTimes: () => {}
+};
+
+// 3. Mock Permissions Query
+const originalQuery = window.navigator.permissions.query;
+window.navigator.permissions.query = (parameters) => (
+    parameters.name === 'notifications' ?
+    Promise.resolve({ state: 'granted' }) :
+    originalQuery(parameters)
+);
+
+// 4. Mock Plugins (Standard Chrome Plugins)
+Object.defineProperty(navigator, 'plugins', {
+    get: () => {
+        const plugins = [
+            {
+                name: 'PDF Viewer',
+                filename: 'internal-pdf-viewer',
+                description: 'Portable Document Format'
+            },
+            {
+                name: 'Chrome PDF Viewer',
+                filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai',
+                description: 'Portable Document Format'
+            },
+            {
+                name: 'Chromium PDF Viewer',
+                filename: 'internal-pdf-viewer',
+                description: 'Portable Document Format'
+            },
+            {
+                name: 'Microsoft Edge PDF Viewer',
+                filename: 'internal-pdf-viewer',
+                description: 'Portable Document Format'
+            },
+            {
+                name: 'WebKit built-in PDF',
+                filename: 'internal-pdf-viewer',
+                description: 'Portable Document Format'
+            }
+        ];
+        return plugins;
+    }
+});
+
+// 5. Mock Languages
+Object.defineProperty(navigator, 'languages', {
+    get: () => ['en-US', 'en']
+});
+
+// 6. WebGL Vendor Spoofing (Hide being headless)
+try {
+    const getParameter = WebGLRenderingContext.prototype.getParameter;
+    WebGLRenderingContext.prototype.getParameter = function(parameter) {
+        // UNMASKED_VENDOR_WEBGL
+        if (parameter === 37445) return 'Google Inc. (NVIDIA)';
+        // UNMASKED_RENDERER_WEBGL
+        if (parameter === 37446) return 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)';
+        return getParameter.call(this, parameter);
+    };
+} catch (e) {}
 """
 
 BROWSER_ARGS = [

@@ -104,6 +104,8 @@ class FormSubmitter:
 
     async def _fill_dropdown(self, page, element, value: str, field_info: Dict) -> bool:
         """Unified dropdown handler with multiple strategies."""
+        
+        # Strategy 1 & 2: Standard <select> element
         strategies = [
             lambda: element.select_option(value=value),
             lambda: element.select_option(label=value),
@@ -117,7 +119,7 @@ class FormSubmitter:
             except:
                 continue
         
-        # Strategy: Partial text match on options
+        # Strategy 3: Partial text match on standard <select> options
         try:
             options = await element.query_selector_all('option')
             for opt in options:
@@ -128,7 +130,58 @@ class FormSubmitter:
         except:
             pass
         
-        # Strategy: Click and select (custom dropdowns)
+        # Strategy 4: Ant Design / React Select / Custom dropdowns
+        # These require clicking to open, then clicking the option
+        try:
+            label = field_info.get('label', '') or field_info.get('display_name', '')
+            
+            # Find the Ant Design select container by label
+            ant_select = None
+            if label:
+                ant_select = await page.query_selector(f'.ant-form-item:has-text("{label}") .ant-select')
+            if not ant_select:
+                ant_select = await page.query_selector(f'.ant-select:has(.ant-select-selection-placeholder:has-text("{label}"))')
+            if not ant_select:
+                # Try finding by field name or nearby the element
+                ant_select = await element.query_selector('xpath=ancestor::*[contains(@class, "ant-form-item")]//div[contains(@class, "ant-select")]')
+            
+            if ant_select:
+                # Click to open dropdown
+                await ant_select.click()
+                await asyncio.sleep(0.5)
+                
+                # Try to find and click the matching option
+                option_selectors = [
+                    f'.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option[title="{value}"]',
+                    f'.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item:has-text("{value}")',
+                    f'.ant-select-dropdown:not(.ant-select-dropdown-hidden) [role="option"]:has-text("{value}")',
+                    f'.rc-virtual-list-holder-inner .ant-select-item:has-text("{value}")',
+                ]
+                
+                for sel in option_selectors:
+                    opt = await page.query_selector(sel)
+                    if opt:
+                        await opt.click()
+                        await asyncio.sleep(0.3)
+                        print(f"   ✓ Selected Ant Design dropdown option: {value}")
+                        return True
+                
+                # Fallback: try partial match
+                options = await page.query_selector_all('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option')
+                for opt in options:
+                    opt_text = await opt.inner_text()
+                    if value.lower() in opt_text.lower():
+                        await opt.click()
+                        await asyncio.sleep(0.3)
+                        print(f"   ✓ Selected Ant Design dropdown option (partial): {opt_text}")
+                        return True
+                
+                # Close dropdown if no option found
+                await page.keyboard.press('Escape')
+        except Exception as e:
+            print(f"   ⚠️ Ant Design dropdown error: {e}")
+        
+        # Strategy 5: Generic click and select (other custom dropdowns)
         try:
             await element.click()
             await asyncio.sleep(0.3)
@@ -139,6 +192,7 @@ class FormSubmitter:
                     return True
         except:
             pass
+        
         return False
 
     async def _fill_radio(self, page, field_name: str, value: str) -> bool:
@@ -223,6 +277,11 @@ class FormSubmitter:
         if not element and label:
             element = await self._find_by_label(page, label)
         
+        # Special case: Custom dropdowns (Ant Design, React Select) may not have standard elements
+        if not element and ftype in ('select', 'dropdown'):
+            # Try to find and fill Ant Design dropdown directly
+            return await self._fill_ant_design_dropdown(page, label or fname, value, field_info)
+        
         if not element:
             return await self._fill_with_js(page, fname, value) if attempt >= 2 else False
         
@@ -249,6 +308,70 @@ class FormSubmitter:
         elif ftype == 'color':
             await element.fill(value)
             return True
+        
+        return False
+    
+    async def _fill_ant_design_dropdown(self, page, label: str, value: str, field_info: Dict) -> bool:
+        """Fill Ant Design dropdown directly by label."""
+        try:
+            # Try to find the dropdown container
+            ant_select = None
+            if label:
+                # Look for Ant Design form item containing this label
+                ant_select = await page.query_selector(f'.ant-form-item:has-text("{label}") .ant-select')
+                
+            if not ant_select:
+                ant_select = await page.query_selector(f'.ant-select:has(.ant-select-selection-placeholder:has-text("{label}"))')
+            
+            if not ant_select:
+                # Try any visible ant-select
+                selects = await page.query_selector_all('.ant-select:visible')
+                for sel in selects:
+                    sel_text = await sel.inner_text()
+                    if label.lower() in sel_text.lower() or "select" in sel_text.lower():
+                        ant_select = sel
+                        break
+            
+            if ant_select:
+                # Scroll into view
+                await ant_select.scroll_into_view_if_needed()
+                await asyncio.sleep(0.2)
+                
+                # Click to open dropdown
+                await ant_select.click()
+                await asyncio.sleep(0.5)
+                
+                # Find and click the option
+                option_selectors = [
+                    f'.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option[title="{value}"]',
+                    f'.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item:has-text("{value}")',
+                    f'.ant-select-dropdown:not(.ant-select-dropdown-hidden) [role="option"]:has-text("{value}")',
+                    f'.rc-virtual-list-holder-inner .ant-select-item:has-text("{value}")',
+                ]
+                
+                for sel in option_selectors:
+                    opt = await page.query_selector(sel)
+                    if opt:
+                        await opt.click()
+                        await asyncio.sleep(0.3)
+                        print(f"   ✓ Selected Ant Design dropdown: {label} = {value}")
+                        return True
+                
+                # Fallback: partial match
+                options = await page.query_selector_all('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option')
+                for opt in options:
+                    opt_text = await opt.inner_text()
+                    if value.lower() in opt_text.lower():
+                        await opt.click()
+                        await asyncio.sleep(0.3)
+                        print(f"   ✓ Selected Ant Design dropdown (partial): {label} = {opt_text}")
+                        return True
+                
+                # Close dropdown
+                await page.keyboard.press('Escape')
+                
+        except Exception as e:
+            print(f"   ⚠️ Ant Design dropdown fill error: {e}")
         
         return False
 
