@@ -231,23 +231,25 @@ class FormSchema:
         main_passwords = []
         confirm_passwords = []
         
-        for name, value in formatted.items():
-            if name in self.fields:
-                conv = self.fields[name]
-                # Check if it's a password type
-                if is_password_field(conv.type, conv.name):
-                    if is_confirm_password(conv.name):
-                        confirm_passwords.append(name)
-                    else:
-                        main_passwords.append(name)
+        # Check both present data and schema definition
+        for name, conv in self.fields.items():
+            if is_password_field(conv.type, conv.name):
+                if is_confirm_password(conv.name):
+                    confirm_passwords.append(name)
+                else:
+                    main_passwords.append(name)
         
-        # If we found exactly one main password, sync all confirm fields to it
-        # This handles the common case: Password + Confirm Password
-        if len(main_passwords) == 1 and confirm_passwords:
-            main_pwd_val = formatted[main_passwords[0]]
-            for conf_name in confirm_passwords:
-                print(f"🔄 Syncing {conf_name} to match {main_passwords[0]}")
-                formatted[conf_name] = main_pwd_val
+        # If we have exactly one main password and it has a value
+        if len(main_passwords) == 1:
+            main_pwd_name = main_passwords[0]
+            if main_pwd_name in formatted:
+                main_pwd_val = formatted[main_pwd_name]
+                
+                # Sync to all confirm fields (creating them if missing)
+                for conf_name in confirm_passwords:
+                    if conf_name not in formatted or not formatted[conf_name]:
+                        print(f"🔄 Syncing {conf_name} to match {main_pwd_name}")
+                        formatted[conf_name] = main_pwd_val
                 
         return formatted
 

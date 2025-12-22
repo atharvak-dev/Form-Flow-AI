@@ -58,6 +58,9 @@ Modern **React 18** app with **Vite**.
 - **Feature-Based Structure**: `features/auth`, `features/dashboard`, `features/form-wizard`.
 - **Design System**: Custom Glassmorphism UI (`GlassCard`, `GlassInput`) with TailwindCSS.
 
+### How It Works
+![Magic Fill Flow](docs/how_it_works.png)
+
 ---
 
 ## ✨ Comprehensive Feature Status

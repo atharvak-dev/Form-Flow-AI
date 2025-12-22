@@ -623,7 +623,7 @@ class FormSubmitter:
         
         def is_confirm_field(name, label):
             combined = (name + (label or '')).lower()
-            return any(k in combined for k in ['confirm', 'verify', 'retype', 'cpass']) and 'password' in combined
+            return any(k in combined for k in ['confirm', 'verify', 'retype', 'repeat', 'cpass', 'cpassword']) and 'password' in combined
         
         # Build fields to process
         fields_to_process, processed = [], set()

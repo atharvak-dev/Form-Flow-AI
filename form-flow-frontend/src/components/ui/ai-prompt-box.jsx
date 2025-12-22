@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 const Textarea = React.forwardRef(({ className, ...props }, ref) => (
   <textarea
     className={cn(
-      "flex w-full rounded-md border-none bg-transparent px-3 py-2.5 text-base text-zinc-900 dark:text-gray-100 placeholder:text-zinc-500 dark:placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-0 disabled:cursor-not-allowed disabled:opacity-50 min-h-[44px] resize-none",
+      "flex w-full rounded-md border-none bg-transparent px-3 py-2.5 text-base text-zinc-900 dark:text-gray-100 placeholder:text-zinc-500 dark:placeholder:text-gray-400 focus:outline-none !outline-none focus-visible:outline-none focus-visible:ring-0 disabled:cursor-not-allowed disabled:opacity-50 min-h-[44px] resize-none",
       className
     )}
     ref={ref}
@@ -70,7 +70,6 @@ const PromptInput = React.forwardRef(
             ref={ref}
             className={cn(
               "rounded-3xl border border-zinc-200 dark:border-[#444444] bg-white dark:bg-[#1F2023] p-2 shadow-xl shadow-zinc-200/50 dark:shadow-[0_8px_30px_rgba(0,0,0,0.24)] transition-all duration-300",
-              isLoading && "border-emerald-500/70 dark:border-primary/70",
               className
             )}
           >

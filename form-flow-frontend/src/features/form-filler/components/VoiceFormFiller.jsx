@@ -13,6 +13,10 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
     const [showTextInput, setShowTextInput] = useState(false);
     const [textInputValue, setTextInputValue] = useState('');
 
+    // Magic Fill State
+    const [magicFillLoading, setMagicFillLoading] = useState(true);
+    const [magicFillSummary, setMagicFillSummary] = useState('');
+
     // Refs
     const recognitionRef = useRef(null);
     const pauseTimeoutRef = useRef(null);
@@ -47,11 +51,20 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
 
     const allFields = useMemo(() => {
         return formSchema.flatMap(form =>
-            form.fields.filter(field =>
-                !field.hidden && field.type !== 'submit' &&
-                !(field.type === 'password' && field.name.includes('confirm')) &&
-                !['terms', 'agree'].some(kw => (field.name || '').includes(kw))
-            )
+            form.fields.filter(field => {
+                const name = (field.name || '').toLowerCase();
+                const label = (field.label || '').toLowerCase();
+                const isHidden = field.hidden || field.type === 'hidden';
+                const isSubmit = field.type === 'submit';
+
+                // Robust check for confirmation fields (password confirm/verify)
+                const isConfirm = ['confirm', 'verify', 'repeat', 'retype'].some(k => name.includes(k) || label.includes(k)) &&
+                    (name.includes('password') || label.includes('password') || field.type === 'password');
+
+                const isTerms = ['terms', 'agree', 'policy'].some(kw => name.includes(kw));
+
+                return !isHidden && !isSubmit && !isConfirm && !isTerms;
+            })
         );
     }, [formSchema]);
 
@@ -86,13 +99,59 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
         load();
     }, []);
 
-    // Auto-fill
+    // 🪄 MAGIC FILL - Intelligent auto-fill using LangChain
     useEffect(() => {
-        if (!userProfile || !allFields.length) return;
+        const performMagicFill = async () => {
+            if (!formSchema?.length) {
+                setMagicFillLoading(false);
+                return;
+            }
+
+            try {
+                console.log('✨ Starting Magic Fill...');
+                const response = await api.post('/magic-fill', {
+                    form_schema: formSchema,
+                    user_profile: userProfile || {}
+                });
+
+                if (response.data?.success && response.data.filled) {
+                    const filled = response.data.filled;
+                    console.log('✨ Magic Fill success:', filled);
+
+                    // Merge with existing data
+                    setAutoFilledFields(prev => ({ ...prev, ...filled }));
+                    setFormData(prev => ({ ...prev, ...filled }));
+                    formDataRef.current = { ...formDataRef.current, ...filled };
+
+                    // Show summary
+                    setMagicFillSummary(response.data.summary || `Filled ${Object.keys(filled).length} fields`);
+
+                    // Auto-advance to first unfilled field
+                    const firstUnfilled = allFields.findIndex(f => !filled[f.name] && !formDataRef.current[f.name]);
+                    if (firstUnfilled > 0) {
+                        setCurrentFieldIndex(firstUnfilled);
+                    }
+                }
+            } catch (e) {
+                console.warn('Magic Fill failed:', e.message);
+            } finally {
+                setMagicFillLoading(false);
+            }
+        };
+
+        performMagicFill();
+    }, [formSchema, userProfile, allFields]);
+
+    // Fallback: Simple profile mapping (runs if Magic Fill doesn't cover everything)
+    useEffect(() => {
+        if (!userProfile || !allFields.length || magicFillLoading) return;
         const autoFilled = {};
         const profile = { ...userProfile, fullname: `${userProfile.first_name} ${userProfile.last_name}`.trim() };
 
         allFields.forEach(field => {
+            // Skip if already filled by Magic Fill
+            if (formDataRef.current[field.name]) return;
+
             const cleanName = field.name.toLowerCase().replace(/[^a-z]/g, '');
             for (const [key, profileKey] of Object.entries(fieldMappings)) {
                 if (cleanName.includes(key)) {
@@ -103,22 +162,27 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
         });
 
         if (Object.keys(autoFilled).length) {
-            setAutoFilledFields(autoFilled);
+            setAutoFilledFields(prev => ({ ...prev, ...autoFilled }));
             setFormData(prev => ({ ...prev, ...autoFilled }));
             formDataRef.current = { ...formDataRef.current, ...autoFilled };
         }
-    }, [userProfile, allFields]);
+    }, [userProfile, allFields, magicFillLoading]);
 
-    // Prompt Playback
+    // Prompt Playback & Input Pre-fill
     useEffect(() => {
         if (allFields.length && currentFieldIndex < allFields.length) {
             const field = allFields[currentFieldIndex];
-            setTranscript('');
-            setTextInputValue('');
+
+            // Check if we have an auto-filled value
+            const preFilledValue = formDataRef.current[field.name] || autoFilledFields[field.name];
+
+            setTranscript(preFilledValue || ''); // Show pre-filled value in transcript area
+            setTextInputValue(preFilledValue || '');
             setShowTextInput(false);
+
             playPrompt(field.name);
         }
-    }, [currentFieldIndex, allFields]);
+    }, [currentFieldIndex, allFields, autoFilledFields]);
 
     const playPrompt = async (fieldName) => {
         try {

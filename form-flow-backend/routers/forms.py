@@ -13,8 +13,9 @@ from core.dependencies import (
 from services.voice.processor import VoiceProcessor
 from services.voice.speech import SpeechService
 from services.form.submitter import FormSubmitter
-from services.ai.gemini import GeminiService
+from services.ai.gemini import GeminiService, SmartFormFillerChain
 from services.form.conventions import get_form_schema as get_schema
+from services.ai.smart_autofill import get_smart_autofill
 from core import database, models
 import auth
 from config.settings import settings
@@ -45,6 +46,10 @@ class ConversationalFlowRequest(BaseModel):
 class ComprehensiveFormRequest(BaseModel):
     url: str
     auto_generate_flow: bool = True
+
+class MagicFillRequest(BaseModel):
+    form_schema: List[Dict[str, Any]]
+    user_profile: Dict[str, Any] = {}  # Optional extra profile data
 
 router = APIRouter(tags=["Forms & Automation"])
 
@@ -320,6 +325,78 @@ async def fill_form(data: FormFillRequest):
         raise HTTPException(status_code=500, detail=f"Form filling failed: {str(e)}")
 
 
+@router.post("/magic-fill")
+async def magic_fill(
+    data: MagicFillRequest,
+    request: Request,
+    db: AsyncSession = Depends(database.get_db),
+    gemini_service: GeminiService = Depends(get_gemini_service)
+):
+    """
+    🪄 Magic Fill - Intelligently pre-fill entire form from user profile.
+    
+    Uses LangChain + Gemini to map user data to form fields.
+    """
+    try:
+        # 1. Get user profile from database if authenticated
+        user_profile = dict(data.user_profile)  # Start with request data
+        
+        auth_header = request.headers.get('Authorization')
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+            try:
+                payload = auth.decode_access_token(token)
+                if payload:
+                    email = payload.get("sub")
+                    if email:
+                        result = await db.execute(select(models.User).filter(models.User.email == email))
+                        user = result.scalars().first()
+                        if user:
+                            # Merge DB profile with request profile (request takes precedence)
+                            db_profile = {
+                                "first_name": user.first_name,
+                                "last_name": user.last_name,
+                                "email": user.email,
+                                "mobile": user.mobile,
+                                "city": user.city,
+                                "state": user.state,
+                                "country": user.country,
+                                "fullname": f"{user.first_name} {user.last_name}".strip()
+                            }
+                            user_profile = {**db_profile, **user_profile}
+            except Exception as e:
+                print(f"⚠️ Auth lookup failed: {e}")
+        
+        if not user_profile:
+            return {
+                "success": False,
+                "error": "No user profile available",
+                "filled": {},
+                "unfilled": [],
+                "summary": "Please sign in to use Magic Fill"
+            }
+        
+        # 2. Call Smart Form Filler Chain
+        if not gemini_service:
+            raise HTTPException(status_code=500, detail="Gemini service not available")
+        
+        filler = SmartFormFillerChain(gemini_service.llm)
+        result = await filler.fill(
+            user_profile=user_profile,
+            form_schema=data.form_schema,
+            min_confidence=0.5
+        )
+        
+        print(f"✨ Magic Fill: {len(result.get('filled', {}))} fields filled")
+        
+        return result
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Magic Fill failed: {str(e)}")
+
+
 @router.post("/submit-form")
 async def submit_form(
     data: FormSubmitRequest, 
@@ -383,6 +460,17 @@ async def submit_form(
                             db.add(submission)
                             await db.commit()
                             print(f"📝 Recorded submission history for user {user.email}")
+                            
+                            # Learn from submission for Smart Autofill
+                            try:
+                                await get_smart_autofill().learn_from_submission(
+                                    user_id=str(user.id),
+                                    form_data=formatted_data,
+                                    form_id=data.url
+                                )
+                                print(f"🧠 Smart Autofill learned from submission")
+                            except Exception as e:
+                                print(f"⚠️ Autofill learning failed: {e}")
                 except Exception as e:
                     print(f"⚠️ Failed to record history (Auth error): {e}")
         except Exception as e:
