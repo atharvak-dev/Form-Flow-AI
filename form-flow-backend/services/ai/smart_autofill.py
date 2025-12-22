@@ -114,6 +114,33 @@ class SmartAutofill:
             ]
         
         return suggestions[:self.max_suggestions]
+
+    async def get_profile_from_history(self, user_id: str) -> Dict[str, Any]:
+        """
+        Build a comprehensive user profile from their form submission history.
+        Returns a dictionary of {field_name: value} for the most likely values.
+        """
+        history = await self._get_user_history(user_id)
+        if not history:
+            return {}
+
+        # 1. Identify all unique, non-sensitive fields in history
+        unique_fields = set()
+        for entry in history:
+            for name, data in entry.get('fields', {}).items():
+                if data.get('type') == 'normal':
+                    unique_fields.add(name)
+        
+        # 2. Get best value for each field
+        profile = {}
+        for field_name in unique_fields:
+            # We treat everything as 'text' for generic profile building
+            suggestions = self._analyze_field_values(history, field_name, 'text')
+            if suggestions:
+                # Take the top confidence suggestion
+                profile[field_name] = suggestions[0]['value']
+                
+        return profile
     
     async def learn_from_submission(
         self,

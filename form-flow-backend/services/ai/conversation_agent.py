@@ -42,8 +42,7 @@ logger = get_logger(__name__)
 # Try to import LangChain - graceful fallback if not available
 try:
     from langchain_google_genai import ChatGoogleGenerativeAI
-    from langchain.memory import ConversationBufferMemory
-    from langchain.schema import HumanMessage, AIMessage, SystemMessage
+    from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
     LANGCHAIN_AVAILABLE = True
 except ImportError:
     logger.warning("LangChain not installed. Using fallback mode.")

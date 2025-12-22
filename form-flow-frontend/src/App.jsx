@@ -10,14 +10,25 @@ import LoginPage from '@/pages/LoginPage';
 import RegisterPage from '@/pages/RegisterPage';
 import DashboardPage from '@/pages/DashboardPage';
 
+import { useTheme } from '@/context/ThemeProvider';
+
 function App() {
+  const { isDark } = useTheme();
+
   return (
     <ErrorBoundary>
       <BrowserRouter>
-        <div className="relative min-h-screen font-sans bg-white selection:bg-green-100">
-          {/* Global WebGL Background */}
+        <div className={`relative min-h-screen font-sans transition-colors duration-500
+          ${isDark ? 'bg-[#09090b] selection:bg-green-900/30' : 'bg-white selection:bg-green-100'}`}>
+
+          {/* Global WEBGL Background */}
           <div className="fixed inset-0 z-0 pointer-events-none">
-            <Aurora colorStops={AURORA_COLORS} amplitude={1.0} blend={0.5} speed={0.4} />
+            <Aurora
+              colorStops={isDark ? ['#064e3b', '#065f46', '#059669'] : AURORA_COLORS}
+              amplitude={isDark ? 0.8 : 1.0}
+              blend={isDark ? 0.6 : 0.5}
+              speed={0.4}
+            />
           </div>
 
           {/* Content Layer */}

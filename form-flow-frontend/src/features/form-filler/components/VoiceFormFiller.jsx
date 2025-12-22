@@ -100,19 +100,24 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
     }, []);
 
     // 🪄 MAGIC FILL - Intelligent auto-fill using LangChain
+    // Runs AFTER userProfile is loaded
     useEffect(() => {
         const performMagicFill = async () => {
-            if (!formSchema?.length) {
+            // Wait for user profile to be loaded first
+            if (!formSchema?.length || !userProfile) {
+                console.log('⏳ Waiting for user profile before Magic Fill...');
                 setMagicFillLoading(false);
                 return;
             }
 
             try {
-                console.log('✨ Starting Magic Fill...');
+                console.log('✨ Starting Magic Fill with profile:', userProfile);
                 const response = await api.post('/magic-fill', {
                     form_schema: formSchema,
-                    user_profile: userProfile || {}
+                    user_profile: userProfile
                 });
+
+                console.log('✨ Magic Fill response:', response.data);
 
                 if (response.data?.success && response.data.filled) {
                     const filled = response.data.filled;
@@ -129,18 +134,21 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
                     // Auto-advance to first unfilled field
                     const firstUnfilled = allFields.findIndex(f => !filled[f.name] && !formDataRef.current[f.name]);
                     if (firstUnfilled > 0) {
+                        console.log('✨ Skipping to field:', firstUnfilled, allFields[firstUnfilled]?.name);
                         setCurrentFieldIndex(firstUnfilled);
                     }
+                } else {
+                    console.warn('⚠️ Magic Fill returned no data:', response.data);
                 }
             } catch (e) {
-                console.warn('Magic Fill failed:', e.message);
+                console.error('❌ Magic Fill failed:', e.message, e.response?.data);
             } finally {
                 setMagicFillLoading(false);
             }
         };
 
         performMagicFill();
-    }, [formSchema, userProfile, allFields]);
+    }, [formSchema, userProfile]); // Removed allFields to prevent re-runs
 
     // Fallback: Simple profile mapping (runs if Magic Fill doesn't cover everything)
     useEffect(() => {
@@ -277,11 +285,23 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
     };
 
     const handleNext = (curr) => {
-        if (curr + 1 >= allFields.length) {
+        let nextIdx = curr + 1;
+
+        // Skip fields that are already filled (Magic Fill or Profile)
+        // We check formDataRef because it holds the committed values
+        while (nextIdx < allFields.length) {
+            const field = allFields[nextIdx];
+            if (!formDataRef.current[field.name]) {
+                break; // Found an empty field
+            }
+            nextIdx++;
+        }
+
+        if (nextIdx >= allFields.length) {
             recognitionRef.current?.stop();
             onComplete?.(formDataRef.current);
         } else {
-            setCurrentFieldIndex(curr + 1);
+            setCurrentFieldIndex(nextIdx);
         }
     };
 

@@ -364,6 +364,20 @@ async def magic_fill(
                                 "fullname": f"{user.first_name} {user.last_name}".strip()
                             }
                             user_profile = {**db_profile, **user_profile}
+
+                            # 🧠 Merge with learned history (fills gaps like Company, Title, specific addresses)
+                            try:
+                                history_profile = await get_smart_autofill().get_profile_from_history(str(user.id))
+                                if history_profile:
+                                    print(f"🧠 Merging {len(history_profile)} learned fields from history")
+                                    # Base = History, Overlay = Current Result (DB + Request)
+                                    # We want History to fill gaps, so History is the base.
+                                    # But wait, user_profile already has DB+Request.
+                                    # So: final = {**history_profile, **user_profile}
+                                    # This ensures DB/Request values (verified/explicit) override History.
+                                    user_profile = {**history_profile, **user_profile}
+                            except Exception as e:
+                                print(f"⚠️ History merge failed: {e}")
             except Exception as e:
                 print(f"⚠️ Auth lookup failed: {e}")
         
