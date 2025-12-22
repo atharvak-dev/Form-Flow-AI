@@ -41,10 +41,12 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
 
     // Field Mappings
     const fieldMappings = {
-        'fullname': 'fullname', 'full_name': 'fullname', 'yourname': 'fullname',
-        'first_name': 'first_name', 'last_name': 'last_name',
+        'fullname': 'fullname', 'yourname': 'fullname',
+        'firstname': 'first_name', 'lastname': 'last_name',
         'email': 'email', 'phone': 'mobile', 'mobile': 'mobile',
-        'city': 'city', 'state': 'state', 'country': 'country'
+        'city': 'city', 'state': 'state', 'country': 'country',
+        'zip': 'pincode', 'pin': 'pincode', 'pincode': 'pincode',
+        'address': 'address', 'company': 'company', 'job': 'job_title'
     };
 
     useEffect(() => { indexRef.current = currentFieldIndex; }, [currentFieldIndex]);
@@ -160,7 +162,8 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
             // Skip if already filled by Magic Fill
             if (formDataRef.current[field.name]) return;
 
-            const cleanName = field.name.toLowerCase().replace(/[^a-z]/g, '');
+            // Check both name and label for matches
+            const cleanName = (field.name + ' ' + (field.label || '')).toLowerCase().replace(/[^a-z]/g, '');
             for (const [key, profileKey] of Object.entries(fieldMappings)) {
                 if (cleanName.includes(key)) {
                     if (profile[profileKey]) autoFilled[field.name] = profile[profileKey];
@@ -509,7 +512,7 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
                                             {/* SIRI ORB */}
                                             <button
                                                 onClick={toggleListening}
-                                                className="relative group cursor-pointer focus:outline-none transition-transform active:scale-95"
+                                                className="relative group cursor-pointer outline-none focus:outline-none focus:ring-0 focus:border-none focus-visible:outline-none focus-visible:ring-0 transition-transform active:scale-95"
                                             >
                                                 <div className="relative w-28 h-28 flex items-center justify-center">
                                                     <motion.div
