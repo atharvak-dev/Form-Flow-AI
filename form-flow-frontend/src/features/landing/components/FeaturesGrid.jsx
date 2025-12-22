@@ -1,174 +1,218 @@
-import React, { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Lock, Smartphone, Globe, Zap, Layout, Keyboard, Sparkles, CheckCircle2, ShieldCheck } from "lucide-react";
+import React, { useState, useEffect, memo } from "react";
+import { motion } from "framer-motion";
+import { Lock, Smartphone, Globe, Zap, Keyboard, Sparkles, CheckCircle2, ShieldCheck, Languages, HandMetal, Eye } from "lucide-react";
+import { useTheme } from "@/context/ThemeProvider";
 
 const ANIMATION_EASE = [0.16, 1, 0.3, 1];
 
-/**
- * Smart Auto-Fill Animation
- */
-function AutoFillDemo() {
+// ... (Keep existing CardSkeleton, AutoFillDemo component lines 16-75) ...
+const AutoFillDemo = memo(function AutoFillDemo() {
     const [text, setText] = useState("");
     const fullText = "Alexandra Chen";
+    const [isVisible, setIsVisible] = useState(false);
 
     useEffect(() => {
+        const startDelay = setTimeout(() => setIsVisible(true), 100);
+        return () => clearTimeout(startDelay);
+    }, []);
+
+    useEffect(() => {
+        if (!isVisible) return;
         let index = 0;
         const interval = setInterval(() => {
             setText(fullText.slice(0, index + 1));
             index = (index + 1) % (fullText.length + 12);
         }, 150);
         return () => clearInterval(interval);
-    }, []);
+    }, [isVisible]);
 
     return (
-        <div className="flex items-center justify-center w-full h-full">
-            <div className="bg-white rounded-xl border border-zinc-100 p-5 shadow-sm w-full max-w-[220px]">
+        <div className="flex items-center justify-center w-full h-full min-h-[140px]">
+            <div className="bg-white/90 dark:bg-zinc-800/90 backdrop-blur-sm rounded-xl border border-zinc-200/50 dark:border-zinc-700/50 p-5 shadow-sm w-full max-w-[220px]">
                 <div className="flex gap-2 mb-3">
-                    <div className="w-8 h-8 rounded-full bg-zinc-100" />
+                    <div className="w-8 h-8 rounded-full bg-zinc-100 dark:bg-zinc-700" />
                     <div className="space-y-1">
-                        <div className="w-20 h-2 bg-zinc-100 rounded-full" />
-                        <div className="w-12 h-2 bg-zinc-50 rounded-full" />
+                        <div className="w-20 h-2 bg-zinc-100 dark:bg-zinc-700 rounded-full" />
+                        <div className="w-12 h-2 bg-zinc-50 dark:bg-zinc-600 rounded-full" />
                     </div>
                 </div>
                 <div className="space-y-3">
                     <div>
-                        <div className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-1.5">Full Name</div>
-                        <div className="flex items-center h-9 px-3 bg-zinc-50 rounded-md border border-zinc-100">
-                            <span className="text-sm font-medium text-zinc-800">
+                        <div className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1.5">Full Name</div>
+                        <div className="flex items-center h-9 px-3 bg-zinc-50 dark:bg-zinc-700 rounded-md border border-zinc-100 dark:border-zinc-600">
+                            <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
                                 {text}
                             </span>
-                            <motion.div
-                                animate={{ opacity: [1, 0] }}
-                                transition={{ repeat: Infinity, duration: 0.8 }}
-                                className="w-0.5 h-4 bg-emerald-500 ml-0.5"
-                            />
+                            {isVisible && (
+                                <motion.div
+                                    animate={{ opacity: [1, 0] }}
+                                    transition={{ repeat: Infinity, duration: 0.8 }}
+                                    className="w-0.5 h-4 bg-emerald-500 ml-0.5"
+                                />
+                            )}
                         </div>
                     </div>
                     <div className="opacity-40">
-                        <div className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-1.5">Email</div>
-                        <div className="h-9 w-full bg-zinc-50 rounded-md border border-zinc-100" />
+                        <div className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1.5">Email</div>
+                        <div className="h-9 w-full bg-zinc-50 dark:bg-zinc-700 rounded-md border border-zinc-100 dark:border-zinc-600" />
                     </div>
                 </div>
             </div>
         </div>
     );
-}
+});
 
-/**
- * Universal Form Support Animation
- */
-function UniversalSupportAnim() {
-    const [layout, setLayout] = useState(0);
+// ... (Keep existing MultilingualAnim component lines 77-126) ...
+const MultilingualAnim = memo(function MultilingualAnim() {
+    const languages = [
+        { text: "Hello", lang: "en" },
+        { text: "Hola", lang: "es" },
+        { text: "Bonjour", lang: "fr" },
+        { text: "नमस्ते", lang: "hi" },
+        { text: "你好", lang: "zh" }
+    ];
+    const [index, setIndex] = useState(0);
 
     useEffect(() => {
         const interval = setInterval(() => {
-            setLayout((prev) => (prev + 1) % 3);
-        }, 2800);
+            setIndex((prev) => (prev + 1) % languages.length);
+        }, 2000);
         return () => clearInterval(interval);
     }, []);
 
-    const layouts = ["grid-cols-1", "grid-cols-2", "flex flex-col gap-2"];
-
     return (
-        <div className="h-full flex items-center justify-center w-full">
-            <motion.div
-                className={`grid ${layout === 2 ? "" : layouts[layout]} gap-2 w-full max-w-[180px] p-4 bg-white rounded-xl border border-zinc-100 shadow-sm transition-all duration-500`}
-                layout
-                transition={{ duration: 0.6, ease: ANIMATION_EASE }}
-            >
-                <div className="col-span-full h-2 w-1/3 bg-zinc-100 rounded-full mb-1" />
-                {[1, 2, 3].map((i) => (
-                    <motion.div
-                        key={i}
-                        layout
-                        className={`rounded-lg h-10 w-full border border-zinc-100 ${i === 1 ? "bg-emerald-50/50 border-emerald-100/50" : "bg-zinc-50/50"
-                            }`}
-                        transition={{ duration: 0.6, ease: ANIMATION_EASE }}
+        <div className="flex flex-col items-center justify-center h-full w-full gap-4 min-h-[140px]">
+            <div className="relative w-20 h-20 flex items-center justify-center">
+                <Globe className="w-20 h-20 text-emerald-100 dark:text-emerald-900/30 absolute" strokeWidth={1} />
+                <motion.div
+                    key={index}
+                    initial={{ opacity: 0, scale: 0.8, y: 10 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.8, y: -10 }}
+                    transition={{ duration: 0.5 }}
+                    className="relative z-10 bg-white/90 dark:bg-zinc-800/90 backdrop-blur-sm px-4 py-2 rounded-full border border-zinc-200/50 dark:border-zinc-700/50 shadow-lg"
+                >
+                    <span className="text-lg font-bold text-zinc-900 dark:text-white">
+                        {languages[index].text}
+                    </span>
+                    <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                    </span>
+                </motion.div>
+            </div>
+            <div className="flex gap-2">
+                {languages.map((l, i) => (
+                    <div
+                        key={l.lang}
+                        className={`w-2 h-2 rounded-full transition-colors duration-300 ${i === index ? 'bg-emerald-500' : 'bg-zinc-200 dark:bg-zinc-700'}`}
                     />
                 ))}
-                <motion.button
-                    layout
-                    className="col-span-full h-8 bg-zinc-900 rounded-lg mt-1"
-                    transition={{ duration: 0.6, ease: ANIMATION_EASE }}
-                />
-            </motion.div>
+            </div>
         </div>
     );
-}
+});
 
-/**
- * Speed Metric
- */
-function SpeedMetric() {
+// ... (Keep existing AccessibilityAnim component lines 128-158) ...
+const AccessibilityAnim = memo(function AccessibilityAnim() {
+    return (
+        <div className="flex flex-col items-center justify-center h-full w-full min-h-[140px] gap-4">
+            <div className="grid grid-cols-2 gap-3">
+                <motion.div
+                    className="w-16 h-16 bg-white/50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-200/50 dark:border-zinc-700/50 flex items-center justify-center shadow-sm backdrop-blur-sm"
+                    whileHover={{ scale: 1.05 }}
+                    animate={{ y: [0, -4, 0] }}
+                    transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+                >
+                    <Eye className="w-8 h-8 text-zinc-900 dark:text-white" />
+                </motion.div>
+                <motion.div
+                    className="w-16 h-16 bg-zinc-900/90 dark:bg-white/90 rounded-2xl border border-zinc-800/50 dark:border-zinc-200/50 flex items-center justify-center shadow-sm backdrop-blur-sm"
+                    whileHover={{ scale: 1.05 }}
+                    animate={{ y: [0, -4, 0] }}
+                    transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", delay: 1.5 }}
+                >
+                    <HandMetal className="w-8 h-8 text-white dark:text-zinc-900" />
+                </motion.div>
+            </div>
+            <div className="bg-zinc-100 dark:bg-zinc-800/80 backdrop-blur-sm px-3 py-1 rounded-full text-[10px] font-bold text-zinc-600 dark:text-zinc-300 uppercase tracking-widest border border-zinc-200 dark:border-zinc-700">
+                WCAG 2.1 Compliant
+            </div>
+        </div>
+    );
+});
+
+// ... (Keep existing SpeedMetric, SecurityShield, VoiceCommandAnim lines ... ) ...
+// (I will just copy them to be safe, but with minor style tweaks to match new aesthetic)
+
+const SpeedMetric = memo(function SpeedMetric() {
     const [progress, setProgress] = useState(0);
+    const [isVisible, setIsVisible] = useState(false);
 
     useEffect(() => {
+        const startDelay = setTimeout(() => setIsVisible(true), 300);
+        return () => clearTimeout(startDelay);
+    }, []);
+
+    useEffect(() => {
+        if (!isVisible) return;
         const interval = setInterval(() => {
             setProgress(0);
             setTimeout(() => setProgress(100), 100);
-        }, 3000)
+        }, 3000);
         return () => clearInterval(interval);
-    }, []);
+    }, [isVisible]);
 
     return (
-        <div className="flex flex-col items-center justify-center h-full w-full gap-6">
+        <div className="flex flex-col items-center justify-center h-full w-full gap-6 min-h-[140px]">
             <div className="relative">
                 <svg className="w-24 h-24 -rotate-90">
-                    <circle cx="48" cy="48" r="40" stroke="currentColor" strokeWidth="6" fill="transparent" className="text-zinc-100" />
+                    <circle cx="48" cy="48" r="40" stroke="currentColor" strokeWidth="6" fill="transparent" className="text-zinc-100 dark:text-zinc-800" />
                     <motion.circle
                         cx="48" cy="48" r="40"
                         stroke="currentColor" strokeWidth="6"
                         fill="transparent"
                         className="text-emerald-500"
                         strokeLinecap="round"
+                        style={{ filter: "drop-shadow(0 0 4px rgba(16, 185, 129, 0.5))" }}
                         initial={{ pathLength: 0 }}
-                        animate={{ pathLength: progress / 100 }}
+                        animate={{ pathLength: isVisible ? progress / 100 : 0 }}
                         transition={{ duration: 1.5, ease: "easeOut" }}
                     />
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-2xl font-bold text-zinc-900">0.2s</span>
+                    <span className="text-2xl font-bold text-zinc-900 dark:text-white">0.2s</span>
                 </div>
             </div>
-            <div className="flex items-center gap-2 px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-xs font-medium">
-                <Zap className="w-3 h-3 fill-emerald-700" />
+            <div className="flex items-center gap-2 px-3 py-1 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/50 text-emerald-700 dark:text-emerald-400 rounded-full text-xs font-medium backdrop-blur-sm">
+                <Zap className="w-3 h-3 fill-emerald-700 dark:fill-emerald-400" />
                 <span>Instant Execution</span>
             </div>
         </div>
     );
-}
+});
 
-/**
- * Enterprise Security Shield
- */
-function SecurityShield() {
+const SecurityShield = memo(function SecurityShield() {
     return (
-        <div className="flex items-center justify-center h-full w-full">
+        <div className="flex items-center justify-center h-full w-full min-h-[140px]">
             <div className="relative">
-                {/* Background Rings */}
-                <div className="absolute inset-0 bg-emerald-500/10 blur-2xl rounded-full" />
-
-                <div className="relative w-32 h-32 bg-white rounded-2xl border border-zinc-100 shadow-xl flex items-center justify-center overflow-hidden">
-                    <div className="absolute inset-0 bg-[radial-gradient(#e4e4e7_1px,transparent_1px)] [background-size:16px_16px] opacity-20" />
-
+                <div className="absolute inset-0 bg-emerald-500/20 blur-3xl rounded-full" />
+                <div className="relative w-32 h-32 bg-white/90 dark:bg-zinc-800/80 backdrop-blur-md rounded-2xl border border-zinc-200/50 dark:border-zinc-700/50 shadow-xl flex items-center justify-center overflow-hidden">
+                    <div className="absolute inset-0 bg-[radial-gradient(#e4e4e7_1px,transparent_1px)] dark:bg-[radial-gradient(#3f3f46_1px,transparent_1px)] [background-size:16px_16px] opacity-20" />
                     <motion.div
                         animate={{ scale: [1, 1.05, 1] }}
                         transition={{ duration: 3, repeat: Infinity }}
                     >
-                        <ShieldCheck className="w-12 h-12 text-emerald-500" />
+                        <ShieldCheck className="w-12 h-12 text-emerald-500 drop-shadow-md" />
                     </motion.div>
-
-                    {/* Animated Scan Line */}
                     <motion.div
-                        className="absolute top-0 left-0 w-full h-1 bg-emerald-400/30 blur-[2px]"
+                        className="absolute top-0 left-0 w-full h-1 bg-emerald-400/50 blur-[2px]"
                         animate={{ top: ["0%", "100%", "0%"] }}
                         transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
                     />
                 </div>
-
-                {/* Floating Badges */}
                 <motion.div
-                    className="absolute -top-3 -right-3 bg-zinc-900 text-white text-[10px] font-bold px-2 py-1 rounded-md shadow-lg flex items-center gap-1"
+                    className="absolute -top-3 -right-3 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-[10px] font-bold px-2 py-1 rounded-md shadow-lg flex items-center gap-1"
                     animate={{ y: [0, -5, 0] }}
                     transition={{ duration: 2, repeat: Infinity }}
                 >
@@ -178,74 +222,38 @@ function SecurityShield() {
             </div>
         </div>
     );
-}
+});
 
-/**
- * Cloud Sync / Global
- */
-function CloudSyncAnim() {
+const VoiceCommandAnim = memo(function VoiceCommandAnim() {
+    const [isVisible, setIsVisible] = useState(false);
+
+    useEffect(() => {
+        const startDelay = setTimeout(() => setIsVisible(true), 300);
+        return () => clearTimeout(startDelay);
+    }, []);
+
     return (
-        <div className="flex items-center justify-center h-full w-full relative">
-            {/* Central Hub */}
-            <div className="relative z-10 w-16 h-16 bg-white rounded-2xl border border-zinc-100 shadow-lg flex items-center justify-center">
-                <Globe className="w-8 h-8 text-zinc-900" />
-            </div>
-
-            {/* Orbiting Browsers */}
-            {[0, 120, 240].map((deg, i) => (
-                <motion.div
-                    key={i}
-                    className="absolute w-full h-full flex items-center justify-center"
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 20, repeat: Infinity, ease: "linear", delay: -i * 10 }}
-                >
-                    <motion.div
-                        className="w-10 h-10 bg-white rounded-xl border border-zinc-100 shadow-md flex items-center justify-center absolute -top-8"
-                        animate={{ rotate: -360 }} // Counter-rotate to keep icon upright
-                        transition={{ duration: 20, repeat: Infinity, ease: "linear", delay: -i * 10 }}
-                    >
-                        <div className="w-2 h-2 rounded-full bg-emerald-500" />
-                    </motion.div>
-                </motion.div>
-            ))}
-
-            <div className="absolute inset-0 border border-dashed border-zinc-200 rounded-full scale-150 opacity-50" />
-        </div>
-    );
-}
-
-/**
- * Mobile/Voice Command Demo
- */
-function VoiceCommandAnim() {
-    return (
-        <div className="flex items-center justify-center h-full w-full">
+        <div className="flex items-center justify-center h-full w-full min-h-[240px]">
             <div className="relative">
-                {/* Phone Frame */}
-                <div className="relative w-[140px] h-[240px] bg-white rounded-[2rem] border-[6px] border-zinc-900 shadow-2xl overflow-hidden z-10">
-                    {/* Notch */}
-                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-16 h-4 bg-zinc-900 rounded-b-xl z-20" />
-
-                    {/* Screen Content */}
-                    <div className="pt-8 px-4 flex flex-col h-full bg-zinc-50">
+                <div className="relative w-[140px] h-[240px] bg-white dark:bg-zinc-800 rounded-[2rem] border-[6px] border-zinc-900 dark:border-zinc-700 shadow-2xl overflow-hidden z-10 transition-colors duration-500">
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-16 h-4 bg-zinc-900 dark:bg-zinc-700 rounded-b-xl z-20" />
+                    <div className="pt-8 px-4 flex flex-col h-full bg-zinc-50 dark:bg-zinc-900/50">
                         <div className="flex items-center gap-2 mb-6">
-                            <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center">
+                            <div className="w-8 h-8 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center">
                                 <div className="w-4 h-4 bg-emerald-500 rounded-full" />
                             </div>
                             <div className="space-y-1">
-                                <div className="w-12 h-1.5 bg-zinc-200 rounded-full" />
-                                <div className="w-20 h-1.5 bg-zinc-100 rounded-full" />
+                                <div className="w-12 h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-full" />
+                                <div className="w-20 h-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-full" />
                             </div>
                         </div>
-
-                        {/* Voice Visualizer */}
                         <div className="mt-auto mb-8 flex flex-col items-center">
-                            <div className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-3">Listening...</div>
+                            <div className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-3">Listening...</div>
                             <div className="flex items-end gap-1 h-8">
-                                {[1, 2, 3, 4, 3, 2, 1].map((h, i) => (
+                                {isVisible && [1, 2, 3, 4, 3, 2, 1].map((h, i) => (
                                     <motion.div
                                         key={i}
-                                        className="w-1 bg-zinc-900 rounded-full"
+                                        className="w-1 bg-zinc-900 dark:bg-white rounded-full"
                                         animate={{ height: [8, 24, 12, 32, 16][i % 5] }}
                                         transition={{ repeat: Infinity, duration: 0.8, delay: i * 0.1 }}
                                     />
@@ -254,20 +262,20 @@ function VoiceCommandAnim() {
                         </div>
                     </div>
                 </div>
-
-                {/* Decoration Blob */}
-                <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl" />
+                <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-emerald-500/20 rounded-full blur-[60px]" />
             </div>
         </div>
-    )
-}
+    );
+});
 
-function FeatureCard({ children, className, title, description, icon: Icon, delay = 0 }) {
+/**
+ * Feature Card - Redesigned with Glassmorphism and Spotlights
+ */
+const FeatureCard = memo(function FeatureCard({ children, className, title, description, icon: Icon, delay = 0 }) {
     return (
         <motion.div
             className={`
-                group relative bg-white rounded-3xl p-1 overflow-hidden
-                border border-zinc-100 hover:border-zinc-200 hover:shadow-xl hover:shadow-zinc-200/50 
+                group relative rounded-3xl p-[1px] overflow-hidden
                 transition-all duration-500
                 ${className}
             `}
@@ -277,39 +285,78 @@ function FeatureCard({ children, className, title, description, icon: Icon, dela
             transition={{ delay, duration: 0.5, ease: "easeOut" }}
             whileHover={{ y: -4 }}
         >
-            <div className="absolute inset-0 bg-gradient-to-br from-zinc-50/50 via-white to-white opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+            {/* Animated Border Gradient */}
+            <div className="absolute inset-0 bg-gradient-to-br from-zinc-200/50 via-zinc-100/10 to-transparent dark:from-zinc-700/50 dark:via-zinc-800/10 dark:to-transparent opacity-100 transition-opacity duration-500" />
 
-            <div className="relative h-full flex flex-col rounded-[1.3rem] overflow-hidden bg-white">
+            {/* Hover Spotlight Effect */}
+            <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/20 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+
+            {/* Inner Content - Glassy Background */}
+            <div className="relative h-full flex flex-col rounded-[calc(1.5rem-1px)] overflow-hidden bg-white dark:bg-zinc-900/40 backdrop-blur-sm transition-colors duration-500">
+
                 {/* Content Container */}
-                <div className="flex-1 min-h-[180px] bg-zinc-50/30 flex items-center justify-center p-6 border-b border-zinc-50">
-                    {children}
+                <div className="flex-1 min-h-[180px] flex items-center justify-center p-6 border-b border-zinc-100/50 dark:border-zinc-800/50 relative overflow-hidden">
+                    {/* Subtle grid pattern in background */}
+                    <div className="absolute inset-0 opacity-[0.03] dark:opacity-[0.05] bg-[radial-gradient(#000_1px,transparent_1px)] dark:bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:16px_16px]" />
+                    <div className="relative z-10 w-full">
+                        {children}
+                    </div>
                 </div>
 
-                {/* Bottom Text */}
-                <div className="p-8 bg-white">
-                    <div className="flex items-start justify-between mb-3">
-                        <div className="p-2.5 bg-zinc-50 rounded-xl group-hover:bg-emerald-50 transition-colors duration-300">
-                            <Icon className="w-5 h-5 text-zinc-900 group-hover:text-emerald-600 transition-colors duration-300" />
+                {/* Text Content */}
+                <div className="p-8 bg-white/50 dark:bg-transparent">
+                    <div className="flex items-start justify-between mb-4">
+                        <div className="p-2.5 bg-zinc-100 dark:bg-zinc-800/50 rounded-xl group-hover:bg-emerald-50 dark:group-hover:bg-emerald-900/20 transition-colors duration-300 border border-zinc-200/50 dark:border-zinc-700/50">
+                            <Icon className="w-5 h-5 text-zinc-700 dark:text-zinc-300 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors duration-300" />
                         </div>
                     </div>
-                    <h3 className="text-xl font-semibold text-zinc-900 mb-2">{title}</h3>
-                    <p className="text-sm text-zinc-500 leading-relaxed font-medium">{description}</p>
+                    <h3 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100 mb-2 group-hover:text-emerald-700 dark:group-hover:text-emerald-400 transition-colors">{title}</h3>
+                    <p className="text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed font-medium">{description}</p>
                 </div>
             </div>
         </motion.div>
     );
-}
+});
 
+/**
+ * FeaturesGrid - Main component
+ */
 function FeaturesGrid() {
+    const [isLoaded, setIsLoaded] = useState(false);
+    const { isDark } = useTheme();
+
+    useEffect(() => {
+        const loadTimer = setTimeout(() => setIsLoaded(true), 100);
+        return () => clearTimeout(loadTimer);
+    }, []);
+
+    // Theme Variables - Enhanced for "Premium" look
+    const sectionBg = isDark ? "bg-[#09090b]" : "bg-white"; // Deep black instead of zinc-950
+    const voiceCardBg = isDark ? "bg-zinc-900/60 border border-zinc-800/50 backdrop-blur-md" : "bg-zinc-50 border border-zinc-200";
+    const voiceCardText = isDark ? "text-white" : "text-zinc-900";
+    const voiceCardDesc = isDark ? "text-zinc-400" : "text-zinc-500";
+    const voiceBadgeBg = isDark ? "bg-zinc-800/80 backdrop-blur-sm" : "bg-white";
+    const voiceBadgeBorder = isDark ? "border-zinc-700" : "border-zinc-200";
+    const voiceBadgeText = isDark ? "text-emerald-400" : "text-emerald-600";
+
     return (
-        <section className="bg-white px-4 md:px-6 py-32 flex items-center justify-center relative overflow-hidden">
+        <section className={`${sectionBg} px-4 md:px-6 py-32 flex items-center justify-center relative overflow-hidden transition-colors duration-700`}>
+
+            {/* Ambient Spotlights for Dark Mode */}
+            {isDark && (
+                <>
+                    <div className="absolute top-0 left-1/4 w-[1000px] h-[400px] bg-emerald-900/10 rounded-[100%] blur-[120px] pointer-events-none" />
+                    <div className="absolute bottom-0 right-1/4 w-[800px] h-[600px] bg-indigo-900/5 rounded-[100%] blur-[120px] pointer-events-none" />
+                </>
+            )}
+
             <div className="max-w-[1400px] w-full mx-auto relative z-10">
 
                 {/* Header Section */}
                 <div className="mb-24 flex flex-col md:flex-row md:items-end justify-between gap-8 md:gap-20">
                     <div className="max-w-2xl">
                         <motion.div
-                            className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-100 border border-zinc-200 text-zinc-600 text-xs font-semibold uppercase tracking-wider mb-6"
+                            className={`inline-flex items-center gap-2 px-3 py-1 rounded-full ${isDark ? 'bg-zinc-900/50 border-zinc-800 text-zinc-400' : 'bg-zinc-100 border-zinc-200 text-zinc-600'} border text-xs font-semibold uppercase tracking-wider mb-6 backdrop-blur-sm`}
                             initial={{ opacity: 0, y: 20 }}
                             whileInView={{ opacity: 1, y: 0 }}
                             viewport={{ once: true }}
@@ -319,123 +366,130 @@ function FeaturesGrid() {
                         </motion.div>
 
                         <motion.h2
-                            className="text-4xl md:text-6xl font-semibold text-zinc-900 tracking-tight leading-[1.1]"
+                            className="text-4xl md:text-6xl font-semibold text-zinc-900 dark:text-white tracking-tight leading-[1.1]"
                             initial={{ opacity: 0, y: 20 }}
                             whileInView={{ opacity: 1, y: 0 }}
                             viewport={{ once: true }}
                             transition={{ delay: 0.1 }}
                         >
-                            Built for speed and <span className="text-zinc-400">precision.</span>
+                            Built for speed, <span className="text-zinc-400 dark:text-zinc-600">accessibility & scale.</span>
                         </motion.h2>
                     </div>
 
                     <motion.p
-                        className="text-lg text-zinc-500 max-w-md leading-relaxed mb-1"
+                        className="text-lg text-zinc-500 dark:text-zinc-400 max-w-md leading-relaxed mb-1"
                         initial={{ opacity: 0, y: 20 }}
                         whileInView={{ opacity: 1, y: 0 }}
                         viewport={{ once: true }}
                         transition={{ delay: 0.2 }}
                     >
-                        Our intelligent agents analyze, adapt, and execute form submissions with human-like accuracy at machine speeds.
+                        Our intelligent agents now speak 5+ languages and support full WCAG accessibility compliance out of the box.
                     </motion.p>
                 </div>
 
                 {/* Bento Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {isLoaded ? (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <FeatureCard
+                            className="md:col-start-1"
+                            title="Smart Auto-Fill"
+                            description="Our agents type naturally, detecting fields contextually to fill widely different forms accurately."
+                            icon={Keyboard}
+                            delay={0.1}
+                        >
+                            <AutoFillDemo />
+                        </FeatureCard>
 
-                    {/* Row 1 */}
-                    <FeatureCard
-                        className="md:col-start-1"
-                        title="Smart Auto-Fill"
-                        description="Our agents type naturally, detecting fields contextually to fill widely different forms accurately."
-                        icon={Keyboard}
-                        delay={0.1}
-                    >
-                        <AutoFillDemo />
-                    </FeatureCard>
+                        <FeatureCard
+                            className="md:col-start-2"
+                            title="Multilingual Support"
+                            description="Seamlessly translates and fills forms in English, Spanish, French, Hindi, and Mandarin."
+                            icon={Languages}
+                            delay={0.2}
+                        >
+                            <MultilingualAnim />
+                        </FeatureCard>
 
-                    <FeatureCard
-                        className="md:col-start-2"
-                        title="Adaptive Layouts"
-                        description="Intelligent DOM parsing allows our system to adapt to any form structure instantly."
-                        icon={Layout}
-                        delay={0.2}
-                    >
-                        <UniversalSupportAnim />
-                    </FeatureCard>
+                        <FeatureCard
+                            className="md:col-start-3"
+                            title="Inclusive Design"
+                            description="Fully WCAG 2.1 AA compliant with high contrast, dyslexia-friendly fonts, and screen reader support."
+                            icon={Eye}
+                            delay={0.3}
+                        >
+                            <AccessibilityAnim />
+                        </FeatureCard>
 
-                    <FeatureCard
-                        className="md:col-start-3"
-                        title="Lightning Fast"
-                        description="Optimized execution pipeline ensures submissions happen in milliseconds, not seconds."
-                        icon={Zap}
-                        delay={0.3}
-                    >
-                        <SpeedMetric />
-                    </FeatureCard>
+                        <FeatureCard
+                            className="md:col-span-2"
+                            title="Enterprise Security"
+                            description="End-to-end encryption with zero-retention policy. Your data is processed securely in isolated environments and wiped immediately after submission."
+                            icon={Lock}
+                            delay={0.4}
+                        >
+                            <SecurityShield />
+                        </FeatureCard>
 
-                    {/* Row 2 - Wide Cards */}
-                    <FeatureCard
-                        className="md:col-span-2"
-                        title="Enterprise Security"
-                        description="End-to-end encryption with zero-retention policy. Your data is processed securely in isolated environments and wiped immediately after submission. GDPR & CCPA compliant."
-                        icon={Lock}
-                        delay={0.4}
-                    >
-                        <SecurityShield />
-                    </FeatureCard>
+                        <FeatureCard
+                            className="md:col-span-1"
+                            title="Lightning Fast"
+                            description="Optimized execution pipeline ensures submissions happen in milliseconds, not seconds."
+                            icon={Zap}
+                            delay={0.5}
+                        >
+                            <SpeedMetric />
+                        </FeatureCard>
 
-                    <FeatureCard
-                        className="md:col-span-1"
-                        title="Browser Agnostic"
-                        description="Seamless operation across Chrome, Firefox, and Edge via our cloud pool."
-                        icon={Globe}
-                        delay={0.5}
-                    >
-                        <CloudSyncAnim />
-                    </FeatureCard>
+                        {/* Full Width Voice Feature - REFINED */}
+                        <motion.div
+                            className={`md:col-span-3 ${voiceCardBg} rounded-[2.5rem] p-8 md:p-12 overflow-hidden relative group transition-all duration-500`}
+                            initial={{ opacity: 0, y: 20 }}
+                            whileInView={{ opacity: 1, y: 0 }}
+                            viewport={{ once: true }}
+                            transition={{ delay: 0.6 }}
+                        >
+                            {/* Subtle pulsing background for voice card */}
+                            {isDark && <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none animate-pulse" />}
 
-                    {/* Row 3 - Full Width Feature */}
-                    <motion.div
-                        className="md:col-span-3 bg-zinc-900 rounded-[2.5rem] p-8 md:p-12 overflow-hidden relative group"
-                        initial={{ opacity: 0, y: 20 }}
-                        whileInView={{ opacity: 1, y: 0 }}
-                        viewport={{ once: true }}
-                        transition={{ delay: 0.6 }}
-                    >
-                        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none" />
+                            <div className="relative z-10 flex flex-col md:flex-row items-center gap-12 md:gap-24">
+                                <div className="flex-1 text-center md:text-left">
+                                    <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full ${voiceBadgeBg} border ${voiceBadgeBorder} ${voiceBadgeText} text-xs font-semibold uppercase tracking-wider mb-6 shadow-sm`}>
+                                        <Smartphone className="w-3 h-3" />
+                                        Voice Control
+                                    </div>
+                                    <h3 className={`text-3xl md:text-4xl font-semibold ${voiceCardText} mb-6 tracking-tight`}>"Fill this form for me."</h3>
+                                    <p className={`text-lg ${voiceCardDesc} leading-relaxed max-w-xl font-medium`}>
+                                        Just say the word. Our voice agent parses your intent from natural language and executes complex form filling tasks hands-free.
+                                    </p>
 
-                        <div className="relative z-10 flex flex-col md:flex-row items-center gap-12 md:gap-24">
-                            <div className="flex-1 text-center md:text-left">
-                                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-800 border border-zinc-700 text-emerald-400 text-xs font-semibold uppercase tracking-wider mb-6">
-                                    <Smartphone className="w-3 h-3" />
-                                    Voice Control
+                                    <div className="mt-8 flex flex-col md:flex-row items-center gap-4 text-sm font-medium text-zinc-600 dark:text-zinc-300">
+                                        <div className="flex items-center gap-2">
+                                            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                                            <span>High Accuracy ASR</span>
+                                        </div>
+                                        <div className="hidden md:block w-1 h-1 bg-zinc-300 dark:bg-zinc-700 rounded-full" />
+                                        <div className="flex items-center gap-2">
+                                            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                                            <span>Context Awareness</span>
+                                        </div>
+                                    </div>
                                 </div>
-                                <h3 className="text-3xl md:text-4xl font-semibold text-white mb-6">"Fill this form for me."</h3>
-                                <p className="text-lg text-zinc-400 leading-relaxed max-w-xl">
-                                    Just say the word. Our voice agent parses your intent from natural language and executes complex form filling tasks hands-free.
-                                </p>
 
-                                <div className="mt-8 flex flex-col md:flex-row items-center gap-4 text-sm font-medium text-zinc-300">
-                                    <div className="flex items-center gap-2">
-                                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                                        <span>High Accuracy ASR</span>
-                                    </div>
-                                    <div className="hidden md:block w-1 h-1 bg-zinc-700 rounded-full" />
-                                    <div className="flex items-center gap-2">
-                                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                                        <span>Context Awareness</span>
-                                    </div>
+                                <div className="flex-1 flex justify-center md:justify-end">
+                                    <VoiceCommandAnim />
                                 </div>
                             </div>
-
-                            <div className="flex-1 flex justify-center md:justify-end">
-                                <VoiceCommandAnim />
-                            </div>
-                        </div>
-                    </motion.div>
-
-                </div>
+                        </motion.div>
+                    </div>
+                ) : (
+                    /* Loading skeleton */
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        {/* Simplified skeleton for loading state */}
+                        {[1, 2, 3].map(i => (
+                            <div key={i} className="bg-zinc-100 dark:bg-zinc-900 h-64 rounded-3xl animate-pulse" />
+                        ))}
+                    </div>
+                )}
             </div>
         </section>
     );

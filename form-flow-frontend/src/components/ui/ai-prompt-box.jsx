@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 const Textarea = React.forwardRef(({ className, ...props }, ref) => (
   <textarea
     className={cn(
-      "flex w-full rounded-md border-none bg-transparent px-3 py-2.5 text-base text-gray-100 placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-0 disabled:cursor-not-allowed disabled:opacity-50 min-h-[44px] resize-none",
+      "flex w-full rounded-md border-none bg-transparent px-3 py-2.5 text-base text-zinc-900 dark:text-gray-100 placeholder:text-zinc-500 dark:placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-0 disabled:cursor-not-allowed disabled:opacity-50 min-h-[44px] resize-none",
       className
     )}
     ref={ref}
@@ -24,7 +24,7 @@ const TooltipContent = React.forwardRef(({ className, sideOffset = 4, ...props }
     ref={ref}
     sideOffset={sideOffset}
     className={cn(
-      "z-50 overflow-hidden rounded-md border border-[#333333] bg-[#1F2023] px-3 py-1.5 text-sm text-white shadow-md",
+      "z-50 overflow-hidden rounded-md border border-zinc-200 dark:border-[#333333] bg-white dark:bg-[#1F2023] px-3 py-1.5 text-sm text-zinc-900 dark:text-white shadow-md",
       className
     )}
     {...props}
@@ -35,7 +35,7 @@ TooltipContent.displayName = TooltipPrimitive.Content.displayName;
 const PromptInputContext = React.createContext({
   isLoading: false,
   value: "",
-  setValue: () => {},
+  setValue: () => { },
   maxHeight: 240,
   onSubmit: undefined,
   disabled: false,
@@ -69,8 +69,8 @@ const PromptInput = React.forwardRef(
           <div
             ref={ref}
             className={cn(
-              "rounded-3xl border border-[#444444] bg-[#1F2023] p-2 shadow-[0_8px_30px_rgba(0,0,0,0.24)] transition-all duration-300",
-              isLoading && "border-primary/70",
+              "rounded-3xl border border-zinc-200 dark:border-[#444444] bg-white dark:bg-[#1F2023] p-2 shadow-xl shadow-zinc-200/50 dark:shadow-[0_8px_30px_rgba(0,0,0,0.24)] transition-all duration-300",
+              isLoading && "border-emerald-500/70 dark:border-primary/70",
               className
             )}
           >
@@ -140,9 +140,9 @@ const PromptInputAction = ({ tooltip, children, className, side = "top", ...prop
 
 const Button = React.forwardRef(({ className, variant = "default", size = "default", ...props }, ref) => {
   const variantClasses = {
-    default: "bg-white hover:bg-white/80 text-black",
-    outline: "border border-[#444444] bg-transparent hover:bg-[#3A3A40]",
-    ghost: "bg-transparent hover:bg-[#3A3A40]",
+    default: "bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-white dark:hover:bg-white/80 dark:text-black",
+    outline: "border border-zinc-200 dark:border-[#444444] bg-transparent hover:bg-zinc-100 dark:hover:bg-[#3A3A40]",
+    ghost: "bg-transparent hover:bg-zinc-100 dark:hover:bg-[#3A3A40]",
   };
   const sizeClasses = {
     default: "h-10 px-4 py-2",
@@ -166,7 +166,7 @@ const Button = React.forwardRef(({ className, variant = "default", size = "defau
 Button.displayName = "Button";
 
 export const PromptInputBox = React.forwardRef((props, ref) => {
-  const { onSend = () => {}, isLoading = false, placeholder = "Paste form URL here...", className } = props;
+  const { onSend = () => { }, isLoading = false, placeholder = "Paste form URL here...", className } = props;
   const [input, setInput] = React.useState("");
   const uploadInputRef = React.useRef(null);
 
@@ -185,7 +185,7 @@ export const PromptInputBox = React.forwardRef((props, ref) => {
       onValueChange={setInput}
       isLoading={isLoading}
       onSubmit={handleSubmit}
-      className={cn("w-full bg-[#1F2023] border-[#444444]", className)}
+      className={cn("w-full bg-white dark:bg-[#1F2023] border-zinc-200 dark:border-[#444444]", className)}
       disabled={isLoading}
       ref={ref}
     >
@@ -196,7 +196,7 @@ export const PromptInputBox = React.forwardRef((props, ref) => {
           <PromptInputAction tooltip="Upload image">
             <button
               onClick={() => uploadInputRef.current?.click()}
-              className="flex h-8 w-8 text-[#9CA3AF] cursor-pointer items-center justify-center rounded-full transition-colors hover:bg-gray-600/30 hover:text-[#D1D5DB]"
+              className="flex h-8 w-8 text-zinc-500 dark:text-[#9CA3AF] cursor-pointer items-center justify-center rounded-full transition-colors hover:bg-zinc-100 dark:hover:bg-gray-600/30 hover:text-zinc-900 dark:hover:text-[#D1D5DB]"
             >
               <Paperclip className="h-5 w-5 transition-colors" />
               <input
@@ -216,8 +216,8 @@ export const PromptInputBox = React.forwardRef((props, ref) => {
             className={cn(
               "h-8 w-8 rounded-full transition-all duration-200",
               hasContent
-                ? "bg-white hover:bg-white/80 text-[#1F2023]"
-                : "bg-transparent hover:bg-gray-600/30 text-[#9CA3AF] hover:text-[#D1D5DB]"
+                ? "bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-white dark:hover:bg-white/80 dark:text-[#1F2023]"
+                : "bg-transparent hover:bg-zinc-100 dark:hover:bg-gray-600/30 text-zinc-400 dark:text-[#9CA3AF] hover:text-zinc-600 dark:hover:text-[#D1D5DB]"
             )}
             onClick={handleSubmit}
             disabled={isLoading || !hasContent}

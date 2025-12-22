@@ -121,53 +121,197 @@ export const getUserProfile = async () => {
 };
 
 
-// ============ AI Text Refinement ============
+// ============ Advanced Voice AI Features ============
 
 /**
- * Refine raw STT text using AI with context awareness
+ * Advanced text refinement with confidence scoring and clarification
  * 
- * This calls the LangChain-powered refinement endpoint that:
- * - Removes filler words (um, uh, like, you know)
- * - Corrects speech-to-text errors based on context
- * - Formats values appropriately (emails, phones, names)
- * - Uses question context for accurate interpretation
+ * Features:
+ * - Confidence scoring (0-100%)
+ * - Clarification requests when uncertain
+ * - Multiple suggestions
+ * - Issue detection
  * 
  * @param {string} text - Raw transcript from speech recognition
- * @param {string} question - The question/field label being answered (provides context)
- * @param {string} fieldType - Type hint: email, phone, name, text, etc.
- * @param {Array<{question: string, answer: string}>} previousQA - Previous Q&A pairs for context
- * @returns {Promise<{success: boolean, refined: string, original: string, confidence: number}>}
+ * @param {string} question - The question/field label being answered
+ * @param {string} fieldType - Type hint: email, phone, name, date, address, text
+ * @param {Array<{question: string, answer: string}>} qaHistory - Previous Q&A for context
+ * @param {Object} formContext - Already filled form fields
+ * @returns {Promise<{success, refined, confidence, needs_clarification, suggestions, detected_issues}>}
  */
-export const refineText = async (text, question = '', fieldType = '', previousQA = []) => {
-    // Build context from previous Q&A for better understanding
-    let contextualQuestion = question;
-
-    if (previousQA && previousQA.length > 0) {
-        // Add recent context to help AI understand better
-        const recentContext = previousQA.slice(-3).map(qa =>
-            `Q: ${qa.question} → A: ${qa.answer}`
-        ).join('; ');
-        contextualQuestion = `[Previous: ${recentContext}] Current question: ${question}`;
-    }
-
+export const advancedRefine = async (text, question = '', fieldType = '', qaHistory = [], formContext = {}) => {
     try {
-        const response = await api.post('/refine', {
+        const response = await api.post('/voice/refine', {
             text,
-            question: contextualQuestion,
+            question,
             field_type: fieldType,
-            style: 'default'
+            qa_history: qaHistory,
+            form_context: formContext
         });
         return response.data;
     } catch (error) {
-        console.warn('[refineText] AI refinement failed, returning original:', error.message);
-        // Graceful fallback - return original text
+        console.warn('[advancedRefine] Failed:', error.message);
         return {
             success: false,
             refined: text,
             original: text,
-            confidence: 0
+            confidence: 0,
+            needs_clarification: true,
+            clarification_question: 'Could not process input, please try again.'
         };
     }
 };
 
+/**
+ * Extract multiple entities from a single utterance
+ * 
+ * Example: "My name is John, email john@gmail.com, phone 555-1234"
+ * Returns: { name: "John", email: "john@gmail.com", phone: "555-1234" }
+ * 
+ * @param {string} text - Full spoken utterance
+ * @param {string[]} expectedFields - Optional list of fields to look for
+ * @returns {Promise<{entities, confidence_scores, sensitive_data_detected}>}
+ */
+export const extractEntities = async (text, expectedFields = null) => {
+    try {
+        const response = await api.post('/voice/extract', {
+            text,
+            expected_fields: expectedFields
+        });
+        return response.data;
+    } catch (error) {
+        console.warn('[extractEntities] Failed:', error.message);
+        return { success: false, entities: {}, confidence_scores: {} };
+    }
+};
+
+/**
+ * Validate field value with AI-powered error detection
+ * 
+ * Catches:
+ * - Common typos (.con → .com)
+ * - Format errors (missing @)
+ * - Cross-field inconsistencies
+ * 
+ * @param {string} value - Field value to validate
+ * @param {string} fieldType - Type: email, phone, date, name
+ * @param {Object} context - Form context for cross-validation
+ * @returns {Promise<{is_valid, issues, suggestions, auto_corrected}>}
+ */
+export const validateField = async (value, fieldType, context = {}) => {
+    try {
+        const response = await api.post('/voice/validate', {
+            value,
+            field_type: fieldType,
+            context
+        });
+        return response.data;
+    } catch (error) {
+        console.warn('[validateField] Failed:', error.message);
+        return { is_valid: true, issues: [], suggestions: [] };
+    }
+};
+
+/**
+ * Parse semantic/relative dates to ISO format
+ * 
+ * Examples:
+ * - "next Tuesday" → "2025-12-30"
+ * - "in 2 weeks" → "2026-01-05"
+ * - "tomorrow" → next day
+ * 
+ * @param {string} text - Natural language date
+ * @returns {Promise<{parsed_date, needs_clarification, clarification, confidence}>}
+ */
+export const parseDate = async (text) => {
+    try {
+        const response = await api.post('/voice/parse-date', {
+            text,
+            current_date: new Date().toISOString().split('T')[0]
+        });
+        return response.data;
+    } catch (error) {
+        console.warn('[parseDate] Failed:', error.message);
+        return { success: false, parsed_date: null, needs_clarification: true };
+    }
+};
+
+/**
+ * Process voice navigation commands
+ * 
+ * Supported commands:
+ * - "go back" / "previous" → previous_field
+ * - "skip" / "next" → next_field
+ * - "clear" / "reset" → clear_form
+ * - "repeat" → repeat_question
+ * 
+ * @param {string} command - Voice command text
+ * @param {string} currentField - Current field name
+ * @param {Object} formState - Current form state
+ * @returns {Promise<{action, params, message}>}
+ */
+export const processVoiceCommand = async (command, currentField, formState = {}) => {
+    try {
+        const response = await api.post('/voice/command', {
+            command,
+            current_field: currentField,
+            form_state: formState
+        });
+        return response.data;
+    } catch (error) {
+        console.warn('[processVoiceCommand] Failed:', error.message);
+        return { success: false, action: 'unknown' };
+    }
+};
+
+/**
+ * Get smart autocomplete suggestions
+ * 
+ * @param {string} partialText - Partial input
+ * @param {string} fieldType - Field type
+ * @param {Object} context - Form context (name for email suggestions, etc.)
+ * @returns {Promise<{suggestions, based_on}>}
+ */
+export const getAutocomplete = async (partialText, fieldType, context = {}) => {
+    try {
+        const response = await api.post('/voice/autocomplete', {
+            partial_text: partialText,
+            field_type: fieldType,
+            context
+        });
+        return response.data;
+    } catch (error) {
+        console.warn('[getAutocomplete] Failed:', error.message);
+        return { suggestions: [] };
+    }
+};
+
+/**
+ * Batch process entire utterance - extract, validate, and fill multiple fields
+ * 
+ * This is the "speak once, fill many" feature.
+ * 
+ * @param {string} text - Full spoken utterance
+ * @returns {Promise<{entities, validation_results, fields_extracted}>}
+ */
+export const batchProcess = async (text) => {
+    try {
+        const response = await api.post('/voice/batch', { text });
+        return response.data;
+    } catch (error) {
+        console.warn('[batchProcess] Failed:', error.message);
+        return { success: false, entities: {} };
+    }
+};
+
+/**
+ * Legacy refineText - now calls advancedRefine internally
+ * Kept for backward compatibility
+ */
+export const refineText = async (text, question = '', fieldType = '', previousQA = []) => {
+    const result = await advancedRefine(text, question, fieldType, previousQA);
+    return result;
+};
+
 export default api;
+

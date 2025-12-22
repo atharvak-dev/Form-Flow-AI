@@ -481,3 +481,19 @@ class VoiceProcessor:
         # The form validation will catch those if truly required
         
         return password
+
+
+# Singleton instance
+_voice_processor_instance: Optional[VoiceProcessor] = None
+
+
+def get_voice_processor(openai_key: str = None, gemini_key: str = None) -> VoiceProcessor:
+    """Get singleton VoiceProcessor instance."""
+    global _voice_processor_instance
+    if _voice_processor_instance is None:
+        import os
+        _voice_processor_instance = VoiceProcessor(
+            openai_key=openai_key or os.getenv("OPENAI_API_KEY"),
+            gemini_key=gemini_key or os.getenv("GOOGLE_API_KEY")
+        )
+    return _voice_processor_instance

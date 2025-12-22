@@ -42,22 +42,22 @@
 }
 
 .dark {
-  --card: rgb(25, 25, 25);
+  --card: rgb(9, 9, 11);
   --ring: rgb(26, 137, 23);
-  --input: rgb(36, 36, 36);
+  --input: rgb(39, 39, 42);
   --muted: rgb(0, 0, 0);
   --accent: rgb(26, 137, 23);
-  --border: rgb(36, 36, 36);
-  --popover: rgb(25, 25, 25);
+  --border: rgb(39, 39, 42);
+  --popover: rgb(9, 9, 11);
   --primary: rgb(26, 137, 23);
   --secondary: rgb(0, 0, 0);
-  --background: rgb(25, 25, 25);
-  --foreground: rgb(255, 255, 255);
+  --background: #09090b;
+  --foreground: rgb(250, 250, 250);
   --destructive: #ef4444;
-  --card-foreground: rgb(255, 255, 255);
-  --muted-foreground: rgb(107, 107, 107);
+  --card-foreground: rgb(250, 250, 250);
+  --muted-foreground: rgb(161, 161, 170);
   --accent-foreground: rgb(255, 255, 255);
-  --popover-foreground: rgb(255, 255, 255);
+  --popover-foreground: rgb(250, 250, 250);
   --primary-foreground: rgb(255, 255, 255);
   --secondary-foreground: rgb(255, 255, 255);
   --destructive-foreground: #ffffff;
@@ -121,4 +121,171 @@ body {
 * {
   scrollbar-width: thin;
   scrollbar-color: rgba(156, 163, 175, 0.3) transparent;
+}
+
+/* =============================================================================
+   ACCESSIBILITY & THEME STYLES
+   ============================================================================= */
+
+/* Screen reader only class */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Focus visible for keyboard users */
+.focus-visible:focus-visible,
+*:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Reduce motion for vestibular disorders */
+@media (prefers-reduced-motion: reduce) {
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Class-based reduced motion (for settings toggle) */
+.reduce-motion *,
+.reduce-motion *::before,
+.reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* High contrast theme overrides */
+:root.high-contrast {
+  --card: #000000;
+  --ring: #ffff00;
+  --input: #000000;
+  --muted: #1a1a1a;
+  --accent: #ffffff;
+  --border: #ffffff;
+  --popover: #000000;
+  --primary: #ffffff;
+  --secondary: #1a1a1a;
+  --background: #000000;
+  --foreground: #ffff00;
+  --destructive: #ff0000;
+  --card-foreground: #ffff00;
+  --muted-foreground: #ffffff;
+  --accent-foreground: #000000;
+  --popover-foreground: #ffff00;
+  --primary-foreground: #000000;
+  --secondary-foreground: #ffff00;
+}
+
+:root.high-contrast * {
+  border-width: 2px !important;
+  font-weight: 600 !important;
+}
+
+/* Dyslexia-friendly theme */
+:root.dyslexia {
+  --font-sans: 'OpenDyslexic', 'Comic Sans MS', Arial, sans-serif;
+}
+
+:root.dyslexia body {
+  letter-spacing: 0.05em;
+  word-spacing: 0.2em;
+  line-height: 1.8;
+}
+
+/* Low vision theme */
+:root.low-vision {
+  font-size: 20px !important;
+}
+
+:root.low-vision * {
+  font-weight: 600 !important;
+  line-height: 1.8 !important;
+}
+
+/* Skip link styling */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  padding: 8px 16px;
+  background: var(--primary);
+  color: white;
+  z-index: 100;
+  transition: top 0.2s;
+}
+
+.skip-link:focus {
+  top: 0;
+}
+
+/* Voice input animations */
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.8;
+  }
+
+  50% {
+    transform: scale(1.2);
+    opacity: 0.4;
+  }
+
+  100% {
+    transform: scale(0.8);
+    opacity: 0.8;
+  }
+}
+
+.voice-pulse {
+  animation: pulse-ring 1.5s ease-in-out infinite;
+}
+
+/* Confidence bar colors */
+.confidence-high {
+  background: linear-gradient(90deg, #10b981, #34d399);
+}
+
+.confidence-medium {
+  background: linear-gradient(90deg, #f59e0b, #fbbf24);
+}
+
+.confidence-low {
+  background: linear-gradient(90deg, #ef4444, #f87171);
+}
+
+/* Form field focus improvements */
+input:focus,
+select:focus,
+textarea:focus,
+button:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Voice input specific styles */
+.voice-input-container {
+  position: relative;
+}
+
+.voice-input-container.listening {
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3);
+}
+
+.voice-input-container.processing {
+  opacity: 0.8;
+  pointer-events: none;
 }

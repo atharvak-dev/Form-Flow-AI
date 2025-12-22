@@ -1,10 +1,5 @@
 /**
- * Global Custom Hooks
- * Re-export all hooks from this file for clean imports
+ * Hooks Export Index
  */
 
-// Example: export { useAuth } from './useAuth';
-// Example: export { useForm } from './useForm';
-
-// Placeholder for future hooks
-export { };
+export { default as useAdvancedVoice } from './useAdvancedVoice';

@@ -86,11 +86,12 @@ class SessionSummary(BaseModel):
 _conversation_agent: Optional[ConversationAgent] = None
 
 
-def get_conversation_agent() -> ConversationAgent:
-    """Get or create the conversation agent singleton."""
+async def get_conversation_agent() -> ConversationAgent:
+    """Get or create the conversation agent singleton with SessionManager."""
     global _conversation_agent
     if _conversation_agent is None:
-        _conversation_agent = ConversationAgent()
+        session_manager = await get_session_manager()
+        _conversation_agent = ConversationAgent(session_manager=session_manager)
     return _conversation_agent
 
 
@@ -106,8 +107,7 @@ def get_conversation_agent() -> ConversationAgent:
 )
 async def create_session(
     request: CreateSessionRequest,
-    background_tasks: BackgroundTasks,
-    agent: ConversationAgent = Depends(get_conversation_agent)
+    background_tasks: BackgroundTasks
 ):
     """
     Create a new conversation session for a form.
@@ -116,8 +116,10 @@ async def create_session(
     batch of questions.
     """
     try:
-        # Create session
-        session = agent.create_session(
+        agent = await get_conversation_agent()
+        
+        # Create session (async - persisted to Redis)
+        session = await agent.create_session(
             form_schema=request.form_schema,
             form_url=request.form_url,
             initial_data=request.initial_data
@@ -153,8 +155,7 @@ async def create_session(
     description="Send a user message and receive extracted values + next questions"
 )
 async def process_message(
-    request: MessageRequest,
-    agent: ConversationAgent = Depends(get_conversation_agent)
+    request: MessageRequest
 ):
     """
     Process a user message in an active session.
@@ -163,7 +164,8 @@ async def process_message(
     the next batch of questions.
     """
     try:
-        result = agent.process_user_input(
+        agent = await get_conversation_agent()
+        result = await agent.process_user_input(
             session_id=request.session_id,
             user_input=request.message
         )
@@ -194,12 +196,12 @@ async def process_message(
     description="Confirm a low-confidence extracted value"
 )
 async def confirm_value(
-    request: ConfirmValueRequest,
-    agent: ConversationAgent = Depends(get_conversation_agent)
+    request: ConfirmValueRequest
 ):
     """Confirm a value that had low confidence."""
     try:
-        agent.confirm_value(
+        agent = await get_conversation_agent()
+        await agent.confirm_value(
             session_id=request.session_id,
             field_name=request.field_name,
             confirmed_value=request.confirmed_value
@@ -218,11 +220,11 @@ async def confirm_value(
     description="Get the current state of a conversation session"
 )
 async def get_session_status(
-    session_id: str,
-    agent: ConversationAgent = Depends(get_conversation_agent)
+    session_id: str
 ):
     """Get the current status of a conversation session."""
-    summary = agent.get_session_summary(session_id)
+    agent = await get_conversation_agent()
+    summary = await agent.get_session_summary(session_id)
     
     if "error" in summary:
         raise HTTPException(status_code=404, detail="Session not found or expired")
@@ -243,22 +245,21 @@ async def get_session_status(
     description="End a conversation session and get final data"
 )
 async def end_session(
-    session_id: str,
-    agent: ConversationAgent = Depends(get_conversation_agent)
+    session_id: str
 ):
     """End a conversation session and return final extracted data."""
-    summary = agent.get_session_summary(session_id)
+    agent = await get_conversation_agent()
+    summary = await agent.get_session_summary(session_id)
     
     if "error" in summary:
         raise HTTPException(status_code=404, detail="Session not found")
     
     # Get final data before deleting
-    session = agent.get_session(session_id)
+    session = await agent.get_session(session_id)
     final_data = session.extracted_fields.copy() if session else {}
     
-    # Remove session
-    if session_id in agent.sessions:
-        del agent.sessions[session_id]
+    # Remove session from storage
+    await agent.delete_session(session_id)
     
     logger.info(f"Ended session {session_id} with {len(final_data)} fields")
     

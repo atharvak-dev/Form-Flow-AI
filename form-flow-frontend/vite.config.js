@@ -11,4 +11,10 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  // Force restart trigger
+  server: {
+    watch: {
+      usePolling: true,
+    }
+  }
 })

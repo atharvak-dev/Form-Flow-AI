@@ -230,3 +230,19 @@ class SpeechService:
         except Exception as e:
             logger.error(f"ElevenLabs stream exception: {e}")
             yield b""
+
+
+# Singleton instance
+_speech_service_instance: Optional[SpeechService] = None
+
+
+def get_speech_service(api_key: str = None) -> SpeechService:
+    """Get singleton SpeechService instance."""
+    global _speech_service_instance
+    if _speech_service_instance is None:
+        import os
+        _speech_service_instance = SpeechService(
+            api_key=api_key or os.getenv("ELEVENLABS_API_KEY")
+        )
+    return _speech_service_instance
+

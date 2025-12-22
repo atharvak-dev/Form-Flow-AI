@@ -74,6 +74,35 @@ class ConversationSession:
     def update_activity(self):
         """Update last activity timestamp."""
         self.last_activity = datetime.now()
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize session to dictionary for Redis storage."""
+        return {
+            'id': self.id,
+            'form_schema': self.form_schema,
+            'form_url': self.form_url,
+            'extracted_fields': self.extracted_fields,
+            'confidence_scores': self.confidence_scores,
+            'conversation_history': self.conversation_history,
+            'current_question_batch': self.current_question_batch,
+            'created_at': self.created_at.isoformat(),
+            'last_activity': self.last_activity.isoformat()
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'ConversationSession':
+        """Deserialize session from dictionary."""
+        return cls(
+            id=data['id'],
+            form_schema=data['form_schema'],
+            form_url=data['form_url'],
+            extracted_fields=data.get('extracted_fields', {}),
+            confidence_scores=data.get('confidence_scores', {}),
+            conversation_history=data.get('conversation_history', []),
+            current_question_batch=data.get('current_question_batch', []),
+            created_at=datetime.fromisoformat(data['created_at']) if isinstance(data.get('created_at'), str) else data.get('created_at', datetime.now()),
+            last_activity=datetime.fromisoformat(data['last_activity']) if isinstance(data.get('last_activity'), str) else data.get('last_activity', datetime.now())
+        )
 
 
 @dataclass  
@@ -257,17 +286,19 @@ OUTPUT FORMAT (JSON):
     "needs_confirmation": ["field_name", ...]
 }"""
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-1.5-flash"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-1.5-flash", session_manager=None):
         """
         Initialize the conversation agent.
         
         Args:
             api_key: Google API key (falls back to env var)
             model: Gemini model to use
+            session_manager: Optional SessionManager for Redis-backed persistence
         """
         self.api_key = api_key or os.getenv('GOOGLE_API_KEY')
         self.model_name = model
-        self.sessions: Dict[str, ConversationSession] = {}
+        self.session_manager = session_manager  # Redis-backed session storage
+        self._local_sessions: Dict[str, ConversationSession] = {}  # Fallback cache
         self.clusterer = FieldClusterer()
         
         if not self.api_key:
@@ -285,7 +316,7 @@ OUTPUT FORMAT (JSON):
             self.llm = None
             logger.warning("LangChain not available - using fallback mode")
     
-    def create_session(
+    async def create_session(
         self, 
         form_schema: List[Dict[str, Any]], 
         form_url: str = "",
@@ -311,21 +342,59 @@ OUTPUT FORMAT (JSON):
             extracted_fields=initial_data or {}
         )
         
-        self.sessions[session_id] = session
+        # Persist to Redis via SessionManager
+        await self._save_session(session)
         logger.info(f"Created conversation session: {session_id}")
         
         return session
     
-    def get_session(self, session_id: str) -> Optional[ConversationSession]:
-        """Retrieve an existing session."""
-        session = self.sessions.get(session_id)
+    async def get_session(self, session_id: str) -> Optional[ConversationSession]:
+        """Retrieve an existing session from Redis or local cache."""
+        # Try SessionManager first (Redis)
+        if self.session_manager:
+            try:
+                data = await self.session_manager.get_session(session_id)
+                if data:
+                    session = ConversationSession.from_dict(data)
+                    if session.is_expired():
+                        await self.session_manager.delete_session(session_id)
+                        return None
+                    return session
+            except Exception as e:
+                logger.warning(f"SessionManager get failed: {e}")
         
+        # Fallback to local cache
+        session = self._local_sessions.get(session_id)
         if session and session.is_expired():
             logger.info(f"Session {session_id} expired, removing")
-            del self.sessions[session_id]
+            del self._local_sessions[session_id]
             return None
         
         return session
+    
+    async def _save_session(self, session: ConversationSession) -> bool:
+        """Save session to Redis via SessionManager, with local fallback."""
+        if self.session_manager:
+            try:
+                await self.session_manager.save_session(session.to_dict())
+                return True
+            except Exception as e:
+                logger.warning(f"SessionManager save failed, using local cache: {e}")
+        
+        # Fallback to local cache
+        self._local_sessions[session.id] = session
+        return True
+    
+    async def delete_session(self, session_id: str) -> bool:
+        """Delete session from storage."""
+        if self.session_manager:
+            try:
+                await self.session_manager.delete_session(session_id)
+            except Exception as e:
+                logger.warning(f"SessionManager delete failed: {e}")
+        
+        self._local_sessions.pop(session_id, None)
+        return True
     
     def _get_all_fields(self, form_schema: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Extract all fields from form schema."""
@@ -415,7 +484,7 @@ OUTPUT FORMAT (JSON):
             all_but_last = ', '.join(labels[:-1])
             return f"Hello! I'll help you fill this out quickly. Can you tell me your {all_but_last}, and {labels[-1]}? You can say them all at once!"
     
-    def process_user_input(
+    async def process_user_input(
         self, 
         session_id: str, 
         user_input: str
@@ -430,7 +499,7 @@ OUTPUT FORMAT (JSON):
         Returns:
             AgentResponse with extracted values and next questions
         """
-        session = self.get_session(session_id)
+        session = await self.get_session(session_id)
         if not session:
             raise AIServiceError(
                 message="Session not found or expired",
@@ -480,6 +549,9 @@ OUTPUT FORMAT (JSON):
                 session.current_question_batch = [f.get('name') for f in batches[0]]
                 result.next_questions = [f.get('label', f.get('name', '')) for f in batches[0]]
             result.remaining_fields = new_remaining
+        
+        # Persist session changes to Redis
+        await self._save_session(session)
         
         logger.info(f"Session {session_id}: Extracted {len(result.extracted_values)} values, {len(result.remaining_fields)} remaining")
         
@@ -715,22 +787,23 @@ CONVERSATION HISTORY (last 4 turns):
             logger.warning(f"Value refinement failed, using raw values: {e}")
             return extracted_values
     
-    def confirm_value(
+    async def confirm_value(
         self, 
         session_id: str, 
         field_name: str, 
         confirmed_value: str
     ) -> None:
         """Confirm a value that needed verification."""
-        session = self.get_session(session_id)
+        session = await self.get_session(session_id)
         if session:
             session.extracted_fields[field_name] = confirmed_value
             session.confidence_scores[field_name] = 1.0
+            await self._save_session(session)
             logger.info(f"Confirmed {field_name} = {confirmed_value}")
     
-    def get_session_summary(self, session_id: str) -> Dict[str, Any]:
+    async def get_session_summary(self, session_id: str) -> Dict[str, Any]:
         """Get a summary of the session state."""
-        session = self.get_session(session_id)
+        session = await self.get_session(session_id)
         if not session:
             return {"error": "Session not found"}
         
@@ -749,17 +822,17 @@ CONVERSATION HISTORY (last 4 turns):
             "last_activity": session.last_activity.isoformat()
         }
     
-    def cleanup_expired_sessions(self) -> int:
-        """Remove expired sessions. Returns count of removed sessions."""
+    async def cleanup_expired_sessions(self) -> int:
+        """Remove expired sessions from local cache. Redis handles TTL automatically."""
         expired = [
-            sid for sid, session in self.sessions.items() 
+            sid for sid, session in self._local_sessions.items() 
             if session.is_expired()
         ]
         
         for sid in expired:
-            del self.sessions[sid]
+            del self._local_sessions[sid]
         
         if expired:
-            logger.info(f"Cleaned up {len(expired)} expired sessions")
+            logger.info(f"Cleaned up {len(expired)} expired local sessions")
         
         return len(expired)

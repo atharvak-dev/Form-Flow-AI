@@ -6,8 +6,13 @@
 export const API_BASE_URL = 'http://localhost:8000';
 
 // Aurora Background Colors
-export const AURORA_COLORS = ['#bfe4be', '#69da93', '#86efac'];
-export const HERO_AURORA_COLORS = ['#1a8917', '#22c55e', '#86efac'];
+// Light mode friendly colors (emerald/green theme)
+export const AURORA_COLORS = ['#dcfce7', '#86efac', '#bbf7d0'];
+export const HERO_AURORA_COLORS = ['#dcfce7', '#4ade80', '#86efac'];
+
+// Dark mode deep colors (glowing emeralds)
+export const AURORA_COLORS_DARK = ['#064e3b', '#065f46', '#059669'];
+export const HERO_AURORA_COLORS_DARK = ['#064e3b', '#10b981', '#059669'];
 
 // Route Paths
 export const ROUTES = {
