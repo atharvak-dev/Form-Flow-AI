@@ -112,7 +112,12 @@ async function startSession(tabId, formSchema, formUrl) {
 async function sendUserMessage(tabId, text) {
     const session = activeSessions.get(tabId);
     if (!session) {
-        return { success: false, error: 'No active session' };
+        console.error(`No active session found for tab ${tabId}. Active sessions:`, [...activeSessions.keys()]);
+        return {
+            success: false,
+            error: 'No active session. Please click "Fill with Voice" button to start.',
+            debug: { tabId, activeSessionTabs: [...activeSessions.keys()] }
+        };
     }
 
     try {
@@ -255,9 +260,22 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 // Handle tab updates (navigation)
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (changeInfo.status === 'loading' && activeSessions.has(tabId)) {
-        // Page is navigating away, end session
-        console.log('Tab navigating, ending session:', tabId);
-        endSession(tabId);
+        const session = activeSessions.get(tabId);
+        // Only end session if navigating to a different domain
+        try {
+            const sessionDomain = new URL(session.formUrl).hostname;
+            const newDomain = tab.url ? new URL(tab.url).hostname : sessionDomain;
+
+            if (sessionDomain !== newDomain) {
+                console.log('Tab navigating to different domain, ending session:', tabId);
+                endSession(tabId);
+            } else {
+                console.log('Tab navigating within same domain, keeping session:', tabId);
+            }
+        } catch (e) {
+            // If URL parsing fails, be conservative and keep the session
+            console.log('URL parsing failed, keeping session:', tabId);
+        }
     }
 });
 

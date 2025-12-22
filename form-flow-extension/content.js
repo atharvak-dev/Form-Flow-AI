@@ -657,6 +657,29 @@
             userMsg.textContent = text;
             this.agentMessage.parentElement.insertBefore(userMsg, this.transcript);
 
+            // First check if we have an active session
+            try {
+                const statusResponse = await chrome.runtime.sendMessage({ type: 'GET_SESSION_STATUS' });
+
+                if (!statusResponse.hasSession && this.currentFormSchema) {
+                    console.log('FormFlow: No active session, attempting to restart...');
+                    // Try to restart the session
+                    const startResponse = await chrome.runtime.sendMessage({
+                        type: 'START_SESSION',
+                        formSchema: this.currentFormSchema,
+                        formUrl: window.location.href
+                    });
+
+                    if (!startResponse.success) {
+                        this.agentMessage.textContent = 'Session expired. Please close and reopen the voice assistant.';
+                        return;
+                    }
+                    console.log('FormFlow: Session restarted successfully');
+                }
+            } catch (e) {
+                console.error('FormFlow: Error checking/restarting session:', e);
+            }
+
             // Send to background script
             try {
                 const response = await chrome.runtime.sendMessage({
@@ -710,12 +733,19 @@
                     type: 'GET_EXTRACTED_DATA'
                 });
 
-                if (response.success && response.data) {
+                console.log('FormFlow: Extracted data for filling:', response);
+
+                if (response.success && response.data && Object.keys(response.data).length > 0) {
                     const formFiller = new FormFiller();
                     const filled = await formFiller.fillFields(response.data, this.currentFormSchema);
 
                     this.agentMessage.textContent = `✅ Filled ${filled} fields! Please review and submit.`;
                     this.fillBtn.textContent = 'Filled!';
+                } else {
+                    // No data extracted yet
+                    this.agentMessage.textContent = 'No data collected yet. Please speak your information first, then click Fill Form.';
+                    this.fillBtn.textContent = 'Fill Form';
+                    this.fillBtn.disabled = false;
                 }
             } catch (error) {
                 console.error('FormFlow: Error filling form:', error);

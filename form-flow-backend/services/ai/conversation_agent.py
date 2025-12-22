@@ -63,6 +63,7 @@ class ConversationSession:
     confidence_scores: Dict[str, float] = field(default_factory=dict)
     conversation_history: List[Dict[str, str]] = field(default_factory=list)
     current_question_batch: List[str] = field(default_factory=list)
+    skipped_fields: List[str] = field(default_factory=list)  # Track skipped fields
     created_at: datetime = field(default_factory=datetime.now)
     last_activity: datetime = field(default_factory=datetime.now)
     
@@ -84,6 +85,7 @@ class ConversationSession:
             'confidence_scores': self.confidence_scores,
             'conversation_history': self.conversation_history,
             'current_question_batch': self.current_question_batch,
+            'skipped_fields': self.skipped_fields,
             'created_at': self.created_at.isoformat(),
             'last_activity': self.last_activity.isoformat()
         }
@@ -99,6 +101,7 @@ class ConversationSession:
             confidence_scores=data.get('confidence_scores', {}),
             conversation_history=data.get('conversation_history', []),
             current_question_batch=data.get('current_question_batch', []),
+            skipped_fields=data.get('skipped_fields', []),
             created_at=datetime.fromisoformat(data['created_at']) if isinstance(data.get('created_at'), str) else data.get('created_at', datetime.now()),
             last_activity=datetime.fromisoformat(data['last_activity']) if isinstance(data.get('last_activity'), str) else data.get('last_activity', datetime.now())
         )
@@ -403,7 +406,7 @@ OUTPUT FORMAT (JSON):
         return all_fields
     
     def _get_remaining_fields(self, session: ConversationSession) -> List[Dict[str, Any]]:
-        """Get fields that haven't been filled yet."""
+        """Get fields that haven't been filled or skipped yet."""
         all_fields = self._get_all_fields(session.form_schema)
         
         remaining = []
@@ -411,6 +414,7 @@ OUTPUT FORMAT (JSON):
             field_name = field.get('name', '')
             if (field_name and 
                 field_name not in session.extracted_fields and
+                field_name not in session.skipped_fields and  # Exclude skipped fields
                 not field.get('hidden', False) and
                 field.get('type') not in ['submit', 'button', 'hidden']):
                 remaining.append(field)
@@ -519,11 +523,64 @@ OUTPUT FORMAT (JSON):
             if f.get('name') in session.current_question_batch
         ]
         
+        # --- HANDLE SKIP/NEXT COMMANDS ---
+        user_lower = user_input.lower().strip()
+        skip_patterns = ['skip', 'skip it', 'skip this', 'next', 'pass', 'move on', 'next question', 'skip field', 'skip this field']
+        is_skip_command = any(pattern in user_lower for pattern in skip_patterns)
+        
+        if is_skip_command and current_batch:
+            # Skip current batch and move to next
+            logger.info(f"Skip command detected for fields: {[f.get('name') for f in current_batch]}")
+            
+            # Add skipped fields to the session's skipped list
+            skipped_names = [f.get('name') for f in current_batch if f.get('name')]
+            session.skipped_fields.extend(skipped_names)
+            
+            # Get remaining fields (now excludes skipped ones due to _get_remaining_fields)
+            new_remaining = self._get_remaining_fields(session)
+            
+            # Prepare next batch
+            batches = self.clusterer.create_batches(new_remaining)
+            if batches:
+                next_batch = batches[0]
+                session.current_question_batch = [f.get('name') for f in next_batch]
+                next_labels = [f.get('label', f.get('name', '')) for f in next_batch[:3]]
+                if len(next_labels) > 1:
+                    next_q = ', '.join(next_labels[:-1]) + f" and {next_labels[-1]}"
+                else:
+                    next_q = next_labels[0] if next_labels else ""
+                message = f"No problem, I'll skip that. What's your {next_q}?"
+                next_questions = [{'name': f.get('name'), 'label': f.get('label'), 'type': f.get('type')} for f in next_batch]
+            else:
+                message = "Okay, skipped! Looks like we've covered all the fields. Ready to fill the form?"
+                next_questions = []
+            
+            await self._save_session(session)
+            
+            return AgentResponse(
+                message=message,
+                extracted_values={},
+                confidence_scores={},
+                needs_confirmation=[],
+                remaining_fields=new_remaining,
+                is_complete=len(new_remaining) == 0,
+                next_questions=next_questions
+            )
+        
         # Process with LLM or fallback
+        logger.info(f"Processing input: '{user_input[:100]}...'")
+        logger.info(f"Current batch: {[f.get('name') for f in current_batch]}")
+        logger.info(f"Remaining fields: {[f.get('name') for f in remaining_fields]}")
+        logger.info(f"LLM available: {self.llm is not None}, LangChain: {LANGCHAIN_AVAILABLE}")
+        
         if self.llm and LANGCHAIN_AVAILABLE:
+            logger.info("Using LLM for extraction...")
             result = self._process_with_llm(session, user_input, current_batch, remaining_fields)
+            logger.info(f"LLM result - extracted: {result.extracted_values}, message: {result.message[:50]}...")
         else:
+            logger.info("Using fallback extraction...")
             result = self._process_with_fallback(session, user_input, current_batch, remaining_fields)
+            logger.info(f"Fallback result - extracted: {result.extracted_values}")
         
         # Update session with extracted values (REFINED)
         refined_values = self._refine_extracted_values(result.extracted_values, current_batch)
@@ -647,42 +704,136 @@ CONVERSATION HISTORY (last 4 turns):
         current_batch: List[Dict[str, Any]],
         remaining_fields: List[Dict[str, Any]]
     ) -> AgentResponse:
-        """Fallback processing without LLM."""
-        # Simple extraction based on patterns
+        """Fallback processing without LLM - uses robust pattern matching."""
         extracted = {}
         confidence = {}
         
-        user_lower = user_input.lower()
+        user_text = user_input.strip()
+        user_lower = user_text.lower()
         
+        # --- SMART EXTRACTION FROM NATURAL SPEECH ---
+        # Handles patterns like: "my name is X and my email is Y and my phone is Z"
+        
+        # 1. Extract email (handle speech-to-text quirks)
+        # First, normalize common speech patterns for email
+        email_text = user_text
+        email_text = re.sub(r'\s*@\s*', '@', email_text)  # Remove spaces around @
+        email_text = re.sub(r'\s+at\s+', '@', email_text, flags=re.IGNORECASE)  # "at" -> @
+        email_text = re.sub(r'\s+dot\s+', '.', email_text, flags=re.IGNORECASE)  # "dot" -> .
+        email_text = re.sub(r'\s+dot\s*$', '.com', email_text, flags=re.IGNORECASE)  # trailing "dot" -> .com
+        
+        email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', email_text)
+        if email_match:
+            email_value = email_match.group().lower()
+            logger.info(f"Extracted email: {email_value}")
+            # Find the first email field in remaining_fields
+            for field in remaining_fields:
+                fname = field.get('name', '').lower()
+                ftype = field.get('type', '').lower()
+                flabel = field.get('label', '').lower()
+                if ftype == 'email' or 'email' in fname or 'email' in flabel or 'mail' in fname:
+                    extracted[field.get('name')] = email_value
+                    confidence[field.get('name')] = 0.95
+                    break
+        
+        # 2. Extract phone/mobile number
+        # Look for patterns: "9518 377 949", "+91 9518377949", "my mobile is 9518377949"
+        phone_patterns = [
+            r'(?:phone|mobile|cell|tel|number)\s*(?:is|:)?\s*([\d\s\-\+\(\)]{10,})',
+            r'([\+]?\d{10,15})',  # Plain long number
+            r'(\d{4,5}\s+\d{3,4}\s+\d{3,4})',  # Spaced digits like "9518 377 949"
+        ]
+        for pattern in phone_patterns:
+            phone_match = re.search(pattern, user_text, re.IGNORECASE)
+            if phone_match:
+                phone_digits = re.sub(r'[^\d+]', '', phone_match.group(1) if phone_match.lastindex else phone_match.group())
+                if len(phone_digits) >= 10:
+                    # Find phone field
+                    for field in remaining_fields:
+                        fname = field.get('name', '').lower()
+                        ftype = field.get('type', '').lower()
+                        flabel = field.get('label', '').lower()
+                        if (ftype == 'tel' or 'phone' in fname or 'mobile' in fname or 
+                            'phone' in flabel or 'mobile' in flabel or 'cell' in flabel):
+                            if field.get('name') not in extracted:
+                                extracted[field.get('name')] = phone_digits
+                                confidence[field.get('name')] = 0.9
+                                break
+                    break
+        
+        # 3. Extract name (handles "my name is X", "I am X", "X here")
+        name_patterns = [
+            r'(?:my\s+)?(?:name|full\s*name)\s+(?:is|:)\s+([A-Za-z][a-z]*(?:\s+[A-Za-z][a-z]*)+)',  # "my name is John Doe"
+            r'^([A-Za-z][a-z]*(?:\s+[A-Za-z][a-z]*)+)',  # Name at start
+            r'(?:i\s+am|i\'m|this\s+is)\s+([A-Za-z][a-z]*(?:\s+[A-Za-z][a-z]*)+)',  # "I am John Doe"
+        ]
+        for pattern in name_patterns:
+            name_match = re.search(pattern, user_text, re.IGNORECASE)
+            if name_match:
+                name_value = name_match.group(1).strip().title()  # Title case
+                # Skip if it looks like it's part of something else
+                if name_value.lower() not in ['my', 'and', 'the', 'is', 'email', 'phone', 'mobile', 'address']:
+                    # Find name field
+                    for field in remaining_fields:
+                        fname = field.get('name', '').lower()
+                        flabel = field.get('label', '').lower()
+                        if ('name' in fname or 'name' in flabel) and field.get('name') not in extracted:
+                            extracted[field.get('name')] = name_value
+                            confidence[field.get('name')] = 0.85
+                            break
+                    break
+        
+        # 4. Extract select/dropdown fields by matching options
+        for field in remaining_fields:
+            field_name = field.get('name', '')
+            if field_name in extracted:
+                continue
+            
+            field_type = field.get('type', '').lower()
+            options = field.get('options', [])
+            
+            if field_type in ['select', 'radio'] or options:
+                flabel = field.get('label', field_name).lower()
+                
+                # Try to match any option against user input
+                for opt in options:
+                    opt_value = opt.get('value', opt.get('text', ''))
+                    opt_text = opt.get('text', opt.get('label', opt_value))
+                    
+                    if not opt_value or opt_value.lower() in ['', 'select', 'choose', 'please select']:
+                        continue
+                    
+                    # Check if option appears in user input (fuzzy match)
+                    opt_lower = opt_text.lower().strip()
+                    if opt_lower and (opt_lower in user_lower or 
+                                     any(word in user_lower for word in opt_lower.split() if len(word) > 3)):
+                        extracted[field_name] = opt_value
+                        confidence[field_name] = 0.85
+                        logger.info(f"Matched dropdown option: {field_name} = {opt_value}")
+                        break
+        
+        # 5. Fallback: Try to match any remaining current_batch fields more loosely
         for field in current_batch:
             field_name = field.get('name', '')
-            field_type = field.get('type', 'text')
+            if field_name in extracted:
+                continue
             
-            # Email pattern
-            if field_type == 'email' or 'email' in field_name.lower():
-                email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', user_input)
-                if email_match:
-                    extracted[field_name] = email_match.group()
-                    confidence[field_name] = 0.95
+            field_label = field.get('label', field_name).lower()
             
-            # Phone pattern
-            elif field_type == 'tel' or 'phone' in field_name.lower():
-                phone_match = re.search(r'[\d\s\-\+\(\)]{10,}', user_input)
-                if phone_match:
-                    extracted[field_name] = re.sub(r'\s+', '', phone_match.group())
-                    confidence[field_name] = 0.9
-            
-            # Name fields - extract quoted or capitalized words
-            elif 'name' in field_name.lower():
-                # Look for capitalized sequences
-                name_match = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', user_input)
-                if name_match:
-                    extracted[field_name] = name_match[0]
-                    confidence[field_name] = 0.85
+            # Look for "my <field_label> is <value>" pattern
+            label_pattern = rf'(?:my\s+)?{re.escape(field_label)}\s+(?:is|:)\s+(.+?)(?:\s+and\s+|\s+my\s+|$)'
+            label_match = re.search(label_pattern, user_lower)
+            if label_match:
+                value = label_match.group(1).strip()
+                if value and len(value) > 1:
+                    extracted[field_name] = value.title() if 'name' in field_label else value
+                    confidence[field_name] = 0.8
+        
+        # Log extraction results for debugging
+        logger.info(f"Fallback extraction from '{user_text[:50]}...': {extracted}")
         
         # Generate response
         if extracted:
-            filled_str = ', '.join(f"{k}={v}" for k, v in extracted.items())
             remaining_count = len(remaining_fields) - len(extracted)
             
             if remaining_count > 0:
@@ -691,14 +842,21 @@ CONVERSATION HISTORY (last 4 turns):
                 )
                 if batches:
                     next_labels = [f.get('label', f.get('name', '')) for f in batches[0][:3]]
-                    next_q = ', '.join(next_labels[:-1]) + f" and {next_labels[-1]}" if len(next_labels) > 1 else next_labels[0] if next_labels else ""
-                    message = f"Got it! Now, what's your {next_q}?"
+                    if len(next_labels) > 1:
+                        next_q = ', '.join(next_labels[:-1]) + f" and {next_labels[-1]}"
+                    else:
+                        next_q = next_labels[0] if next_labels else ""
+                    # Acknowledge what we got
+                    got_labels = [f.get('label', f.get('name', '')) for f in remaining_fields if f.get('name') in extracted][:3]
+                    ack = f" I got your {', '.join(got_labels)}." if got_labels else ""
+                    message = f"Great!{ack} Now, what's your {next_q}?"
                 else:
                     message = "Thanks! Let me check what else we need."
             else:
                 message = "Perfect! I've got all the information needed. Ready to submit?"
         else:
-            message = "I didn't quite catch that. Could you please repeat?"
+            # Try to give a more helpful message
+            message = "I didn't quite catch that. Could you please say something like 'My name is [your name] and my email is [your email]'?"
         
         return AgentResponse(
             message=message,
@@ -706,7 +864,7 @@ CONVERSATION HISTORY (last 4 turns):
             confidence_scores=confidence,
             needs_confirmation=[k for k, v in confidence.items() if v < 0.7],
             remaining_fields=[f for f in remaining_fields if f.get('name') not in extracted],
-            is_complete=len(remaining_fields) == len(extracted),
+            is_complete=len(remaining_fields) == len(extracted) and len(extracted) > 0,
             next_questions=[]
         )
     
