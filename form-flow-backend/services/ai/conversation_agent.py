@@ -22,6 +22,7 @@ Usage:
 import os
 import json
 import re
+import asyncio
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -29,6 +30,29 @@ import uuid
 
 from utils.logging import get_logger, log_api_call
 from utils.exceptions import AIServiceError
+from utils.validators import validate_form_schema, validate_user_input, InputValidationError
+from utils.pii_sanitizer import sanitize_for_log
+from config.constants import (
+    CONFIDENCE_THRESHOLD_MEDIUM,
+    SESSION_TTL_MINUTES,
+    MAX_CONVERSATION_CONTEXT_TURNS,
+    MAX_UPCOMING_FIELDS_CONTEXT,
+    LLM_MAX_RETRIES,
+    LLM_RETRY_BASE_DELAY,
+    LLM_RETRY_MAX_DELAY,
+    LLM_TEMPERATURE,
+    DEFAULT_LLM_MODEL,
+    BATCH_SIZE_SIMPLE,
+    BATCH_SIZE_MODERATE,
+    BATCH_SIZE_COMPLEX,
+    SIMPLE_FIELD_TYPES,
+    MODERATE_FIELD_TYPES,
+    COMPLEX_FIELD_TYPES,
+    PHONE_MIN_DIGITS,
+    PHONE_MAX_DIGITS,
+    TEXT_MIN_LENGTH,
+    TEXT_MAX_LENGTH,
+)
 
 # Import TextRefiner for cleaning extracted values
 try:
@@ -36,6 +60,28 @@ try:
     TEXT_REFINER_AVAILABLE = True
 except ImportError:
     TEXT_REFINER_AVAILABLE = False
+
+# Import Conversational Intelligence components
+from services.ai.conversation_intelligence import (
+    ConversationContext,
+    IntentRecognizer,
+    AdaptiveResponseGenerator,
+    ProgressTracker,
+    CorrectionRecord,
+    UndoRecord,
+    PersonalityConfig,
+    UserIntent,
+    UserSentiment,
+)
+
+# Import Voice Processing components
+from services.ai.voice_processor import (
+    VoiceInputProcessor,
+    ClarificationStrategy,
+    ConfidenceCalibrator,
+    MultiModalFallback,
+    NoiseHandler,
+)
 
 logger = get_logger(__name__)
 
@@ -55,7 +101,7 @@ except ImportError:
 
 @dataclass
 class ConversationSession:
-    """Represents an active conversation session."""
+    """Represents an active conversation session with enhanced conversational context."""
     id: str
     form_schema: List[Dict[str, Any]]
     form_url: str
@@ -63,9 +109,14 @@ class ConversationSession:
     confidence_scores: Dict[str, float] = field(default_factory=dict)
     conversation_history: List[Dict[str, str]] = field(default_factory=list)
     current_question_batch: List[str] = field(default_factory=list)
-    skipped_fields: List[str] = field(default_factory=list)  # Track skipped fields
+    skipped_fields: List[str] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     last_activity: datetime = field(default_factory=datetime.now)
+    
+    # Enhanced conversational intelligence fields
+    conversation_context: ConversationContext = field(default_factory=ConversationContext)
+    undo_stack: List[Dict[str, Any]] = field(default_factory=list)
+    correction_history: List[Dict[str, Any]] = field(default_factory=list)
     
     def is_expired(self, ttl_minutes: int = 30) -> bool:
         """Check if session has expired."""
@@ -74,6 +125,15 @@ class ConversationSession:
     def update_activity(self):
         """Update last activity timestamp."""
         self.last_activity = datetime.now()
+    
+    def get_total_field_count(self) -> int:
+        """Get total number of fillable fields."""
+        count = 0
+        for form in self.form_schema:
+            for f in form.get('fields', []):
+                if f.get('type') not in ['submit', 'button', 'hidden'] and not f.get('hidden'):
+                    count += 1
+        return count
     
     def to_dict(self) -> Dict[str, Any]:
         """Serialize session to dictionary for Redis storage."""
@@ -87,7 +147,10 @@ class ConversationSession:
             'current_question_batch': self.current_question_batch,
             'skipped_fields': self.skipped_fields,
             'created_at': self.created_at.isoformat(),
-            'last_activity': self.last_activity.isoformat()
+            'last_activity': self.last_activity.isoformat(),
+            'conversation_context': self.conversation_context.to_dict(),
+            'undo_stack': self.undo_stack,
+            'correction_history': self.correction_history,
         }
     
     @classmethod
@@ -103,7 +166,10 @@ class ConversationSession:
             current_question_batch=data.get('current_question_batch', []),
             skipped_fields=data.get('skipped_fields', []),
             created_at=datetime.fromisoformat(data['created_at']) if isinstance(data.get('created_at'), str) else data.get('created_at', datetime.now()),
-            last_activity=datetime.fromisoformat(data['last_activity']) if isinstance(data.get('last_activity'), str) else data.get('last_activity', datetime.now())
+            last_activity=datetime.fromisoformat(data['last_activity']) if isinstance(data.get('last_activity'), str) else data.get('last_activity', datetime.now()),
+            conversation_context=ConversationContext.from_dict(data.get('conversation_context', {})),
+            undo_stack=data.get('undo_stack', []),
+            correction_history=data.get('correction_history', []),
         )
 
 
@@ -608,16 +674,16 @@ class FieldClusterer:
         ]
     }
     
-    # Max questions per batch based on field type
+    # Max questions per batch based on field type (from constants)
     MAX_QUESTIONS = {
-        'simple': 4,      # text, email, phone
-        'moderate': 2,    # select, radio
-        'complex': 1      # textarea, file
+        'simple': BATCH_SIZE_SIMPLE,
+        'moderate': BATCH_SIZE_MODERATE,
+        'complex': BATCH_SIZE_COMPLEX,
     }
     
-    SIMPLE_TYPES = {'text', 'email', 'tel', 'number', 'date'}
-    MODERATE_TYPES = {'select', 'radio'}
-    COMPLEX_TYPES = {'textarea', 'file', 'checkbox'}
+    SIMPLE_TYPES = SIMPLE_FIELD_TYPES
+    MODERATE_TYPES = MODERATE_FIELD_TYPES
+    COMPLEX_TYPES = COMPLEX_FIELD_TYPES
     
     def __init__(self):
         # Compile patterns for efficiency
@@ -765,7 +831,13 @@ class ConversationAgent:
             
         Returns:
             ConversationSession: New session object
+            
+        Raises:
+            InputValidationError: If form_schema is invalid
         """
+        # Validate form schema
+        validate_form_schema(form_schema)
+        
         session_id = str(uuid.uuid4())
         
         session = ConversationSession(
@@ -924,7 +996,13 @@ class ConversationAgent:
         user_input: str
     ) -> AgentResponse:
         """
-        Process user input and extract field values.
+        Process user input with enhanced conversational intelligence.
+        
+        Handles:
+        - Intent recognition (corrections, help, status, skip, undo)
+        - Context tracking (sentiment, confusion)
+        - Adaptive response generation
+        - Progress updates
         
         Args:
             session_id: The session ID
@@ -942,87 +1020,139 @@ class ConversationAgent:
             )
         
         session.update_activity()
-        session.conversation_history.append({
-            'role': 'user',
-            'content': user_input
-        })
         
-        # Get context for LLM
+        # Detect user intent
+        intent_recognizer = IntentRecognizer()
+        intent, intent_confidence = intent_recognizer.detect_intent(user_input)
+        
+        logger.info(f"Detected intent: {intent} (confidence: {intent_confidence:.2f})")
+        
+        # Update conversation context with sentiment analysis
+        session.conversation_context.update_from_input(user_input)
+        session.conversation_context.last_intent = intent
+        
+        # Get context for processing
         remaining_fields = self._get_remaining_fields(session)
         current_batch = [
             f for f in remaining_fields 
             if f.get('name') in session.current_question_batch
         ]
         
-        # --- HANDLE SKIP/NEXT COMMANDS ---
-        user_lower = user_input.lower().strip()
-        skip_patterns = ['skip', 'skip it', 'skip this', 'next', 'pass', 'move on', 'next question', 'skip field', 'skip this field']
-        is_skip_command = any(pattern in user_lower for pattern in skip_patterns)
+        total_fields = session.get_total_field_count()
+        extracted_count = len(session.extracted_fields)
         
-        if is_skip_command and current_batch:
-            # Skip current batch and move to next
-            logger.info(f"Skip command detected for fields: {[f.get('name') for f in current_batch]}")
-            
-            # Add skipped fields to the session's skipped list
-            skipped_names = [f.get('name') for f in current_batch if f.get('name')]
-            session.skipped_fields.extend(skipped_names)
-            
-            # Get remaining fields (now excludes skipped ones due to _get_remaining_fields)
-            new_remaining = self._get_remaining_fields(session)
-            
-            # Prepare next batch
-            batches = self.clusterer.create_batches(new_remaining)
-            if batches:
-                next_batch = batches[0]
-                session.current_question_batch = [f.get('name') for f in next_batch]
-                next_labels = [f.get('label', f.get('name', '')) for f in next_batch[:3]]
-                if len(next_labels) > 1:
-                    next_q = ', '.join(next_labels[:-1]) + f" and {next_labels[-1]}"
-                else:
-                    next_q = next_labels[0] if next_labels else ""
-                message = f"No problem, I'll skip that. What's your {next_q}?"
-                next_questions = [{'name': f.get('name'), 'label': f.get('label'), 'type': f.get('type')} for f in next_batch]
-            else:
-                message = "Okay, skipped! Looks like we've covered all the fields. Ready to fill the form?"
-                next_questions = []
-            
-            await self._save_session(session)
-            
+        # --- HANDLE SPECIAL INTENTS BEFORE EXTRACTION ---
+        
+        # Handle UNDO intent
+        if intent == UserIntent.UNDO or intent == UserIntent.BACK:
+            return await self._handle_undo(session)
+        
+        # Handle CORRECTION intent
+        if intent == UserIntent.CORRECTION:
+            correction_result = await self._handle_correction(session, user_input)
+            if correction_result:
+                return correction_result
+        
+        # Handle STATUS intent
+        if intent == UserIntent.STATUS:
+            status_msg = ProgressTracker.get_status_message(extracted_count, total_fields)
             return AgentResponse(
-                message=message,
+                message=status_msg,
                 extracted_values={},
                 confidence_scores={},
                 needs_confirmation=[],
-                remaining_fields=new_remaining,
-                is_complete=len(new_remaining) == 0,
-                next_questions=next_questions
+                remaining_fields=remaining_fields,
+                is_complete=len(remaining_fields) == 0,
+                next_questions=[]
             )
         
+        # Handle HELP intent
+        if intent == UserIntent.HELP:
+            help_msg = self._generate_help_message(current_batch)
+            return AgentResponse(
+                message=help_msg,
+                extracted_values={},
+                confidence_scores={},
+                needs_confirmation=[],
+                remaining_fields=remaining_fields,
+                is_complete=False,
+                next_questions=[{'name': f.get('name'), 'label': f.get('label'), 'type': f.get('type')} for f in current_batch]
+            )
+        
+        # Handle SKIP intent
+        if intent == UserIntent.SKIP and current_batch:
+            return await self._handle_skip(session, current_batch)
+        
+        # Handle SMALL_TALK intent
+        if intent == UserIntent.SMALL_TALK:
+            small_talk_msg = AdaptiveResponseGenerator._handle_small_talk(extracted_count, len(remaining_fields))
+            return AgentResponse(
+                message=small_talk_msg,
+                extracted_values={},
+                confidence_scores={},
+                needs_confirmation=[],
+                remaining_fields=remaining_fields,
+                is_complete=len(remaining_fields) == 0,
+                next_questions=[{'name': f.get('name'), 'label': f.get('label'), 'type': f.get('type')} for f in current_batch]
+            )
+        
+        # --- REGULAR EXTRACTION PROCESSING ---
+        
+        # Add to conversation history with intent metadata
+        session.conversation_history.append({
+            'role': 'user',
+            'content': user_input,
+            'intent': intent.value if intent else None,
+            'sentiment': session.conversation_context.user_sentiment.value
+        })
+        
         # Process with LLM or fallback
-        logger.info(f"Processing input: '{user_input[:100]}...'")
-        logger.info(f"Current batch: {[f.get('name') for f in current_batch]}")
-        logger.info(f"Remaining fields: {[f.get('name') for f in remaining_fields]}")
-        logger.info(f"LLM available: {self.llm is not None}, LangChain: {LANGCHAIN_AVAILABLE}")
+        logger.info(f"Processing input: '{sanitize_for_log(user_input[:100])}...'")
+        logger.debug(f"Current batch: {[f.get('name') for f in current_batch]}")
         
         if self.llm and LANGCHAIN_AVAILABLE:
-            logger.info("Using LLM for extraction...")
-            result = self._process_with_llm(session, user_input, current_batch, remaining_fields)
-            logger.info(f"LLM result - extracted: {result.extracted_values}, message: {result.message[:50]}...")
+            result = await self._process_with_llm(session, user_input, current_batch, remaining_fields)
         else:
-            logger.info("Using fallback extraction...")
             result = self._process_with_fallback(session, user_input, current_batch, remaining_fields)
-            logger.info(f"Fallback result - extracted: {result.extracted_values}")
         
         # Update session with extracted values (REFINED)
         refined_values = self._refine_extracted_values(result.extracted_values, current_batch)
         for field_name, value in refined_values.items():
             if field_name not in result.needs_confirmation:
+                # Add to undo stack before updating
+                session.undo_stack.append({
+                    'field_name': field_name,
+                    'value': value,
+                    'timestamp': datetime.now().isoformat()
+                })
                 session.extracted_fields[field_name] = value
                 session.confidence_scores[field_name] = result.confidence_scores.get(field_name, 1.0)
         
-        # Update result with refined values
         result.extracted_values = refined_values
         
+        # Generate adaptive response
+        new_remaining = self._get_remaining_fields(session)
+        new_extracted_count = len(session.extracted_fields)
+        
+        adaptive_message = AdaptiveResponseGenerator.generate_response(
+            extracted_values=result.extracted_values,
+            remaining_fields=new_remaining,
+            context=session.conversation_context,
+            current_batch=current_batch,
+            user_intent=intent,
+            extracted_count=new_extracted_count,
+            total_count=total_fields
+        )
+        
+        # Add progress milestone if appropriate
+        if ProgressTracker.should_show_progress(new_extracted_count):
+            milestone = ProgressTracker.get_milestone_message(new_extracted_count, total_fields, include_count=False)
+            if milestone:
+                adaptive_message = f"{milestone} {adaptive_message}"
+        
+        result.message = adaptive_message
+        
+        # Add to history
         session.conversation_history.append({
             'role': 'assistant', 
             'content': result.message
@@ -1030,28 +1160,208 @@ class ConversationAgent:
         
         # Prepare next batch if needed
         if not result.is_complete:
-            new_remaining = self._get_remaining_fields(session)
             batches = self.clusterer.create_batches(new_remaining)
             if batches:
                 session.current_question_batch = [f.get('name') for f in batches[0]]
                 result.next_questions = [{'name': f.get('name'), 'label': f.get('label'), 'type': f.get('type')} for f in batches[0]]
             result.remaining_fields = new_remaining
+            result.is_complete = len(new_remaining) == 0
         
-        # Persist session changes to Redis
+        # Persist session changes
         await self._save_session(session)
         
         logger.info(f"Session {session_id}: Extracted {len(result.extracted_values)} values, {len(result.remaining_fields)} remaining")
         
         return result
     
-    def _process_with_llm(
+    async def _handle_undo(self, session: ConversationSession) -> AgentResponse:
+        """Handle undo/back request."""
+        if not session.undo_stack:
+            return AgentResponse(
+                message="There's nothing to undo right now. Let's continue!",
+                extracted_values={},
+                confidence_scores={},
+                needs_confirmation=[],
+                remaining_fields=self._get_remaining_fields(session),
+                is_complete=False,
+                next_questions=[]
+            )
+        
+        # Pop last action
+        last_action = session.undo_stack.pop()
+        field_name = last_action.get('field_name')
+        
+        # Remove from extracted fields
+        if field_name in session.extracted_fields:
+            del session.extracted_fields[field_name]
+        if field_name in session.confidence_scores:
+            del session.confidence_scores[field_name]
+        
+        await self._save_session(session)
+        
+        # Get field label for friendly message
+        remaining = self._get_remaining_fields(session)
+        field_label = field_name
+        for f in remaining:
+            if f.get('name') == field_name:
+                field_label = f.get('label', field_name)
+                break
+        
+        return AgentResponse(
+            message=f"Okay, I've removed your {field_label}. What would you like to enter instead?",
+            extracted_values={},
+            confidence_scores={},
+            needs_confirmation=[],
+            remaining_fields=remaining,
+            is_complete=False,
+            next_questions=[{'name': f.get('name'), 'label': f.get('label'), 'type': f.get('type')} for f in remaining[:1]]
+        )
+    
+    async def _handle_correction(
+        self, 
+        session: ConversationSession, 
+        user_input: str
+    ) -> Optional[AgentResponse]:
+        """Handle correction request."""
+        intent_recognizer = IntentRecognizer()
+        correction_info = intent_recognizer.extract_correction_info(user_input)
+        
+        if not correction_info:
+            # Couldn't parse correction - ask for clarification
+            recent_fields = list(session.extracted_fields.keys())[-3:]
+            if recent_fields:
+                return AgentResponse(
+                    message=f"I'd be happy to fix that. Which field would you like to correct? (Recent: {', '.join(recent_fields)})",
+                    extracted_values={},
+                    confidence_scores={},
+                    needs_confirmation=[],
+                    remaining_fields=self._get_remaining_fields(session),
+                    is_complete=False,
+                    next_questions=[]
+                )
+            return None
+        
+        field_identifier, new_value = correction_info
+        
+        # Find matching field
+        matched_field = None
+        for field_name in session.extracted_fields.keys():
+            if field_identifier in field_name.lower():
+                matched_field = field_name
+                break
+        
+        if not matched_field:
+            return AgentResponse(
+                message=f"I couldn't find a field matching '{field_identifier}'. Which field did you mean?",
+                extracted_values={},
+                confidence_scores={},
+                needs_confirmation=[],
+                remaining_fields=self._get_remaining_fields(session),
+                is_complete=False,
+                next_questions=[]
+            )
+        
+        # Record correction
+        old_value = session.extracted_fields[matched_field]
+        session.correction_history.append({
+            'field_name': matched_field,
+            'original_value': old_value,
+            'corrected_value': new_value,
+            'timestamp': datetime.now().isoformat(),
+        })
+        session.conversation_context.record_correction(matched_field)
+        
+        # Update value
+        session.extracted_fields[matched_field] = new_value
+        await self._save_session(session)
+        
+        return AgentResponse(
+            message=f"Got it! I've updated your {matched_field} to '{new_value}'. Let's continue.",
+            extracted_values={matched_field: new_value},
+            confidence_scores={matched_field: 1.0},
+            needs_confirmation=[],
+            remaining_fields=self._get_remaining_fields(session),
+            is_complete=False,
+            next_questions=[]
+        )
+    
+    async def _handle_skip(
+        self, 
+        session: ConversationSession, 
+        current_batch: List[Dict[str, Any]]
+    ) -> AgentResponse:
+        """Handle skip request for current batch."""
+        logger.info(f"Skip command for fields: {[f.get('name') for f in current_batch]}")
+        
+        # Add skipped fields
+        skipped_names = [f.get('name') for f in current_batch if f.get('name')]
+        session.skipped_fields.extend(skipped_names)
+        
+        # Get new remaining
+        new_remaining = self._get_remaining_fields(session)
+        
+        # Prepare next batch
+        batches = self.clusterer.create_batches(new_remaining)
+        if batches:
+            next_batch = batches[0]
+            session.current_question_batch = [f.get('name') for f in next_batch]
+            next_labels = [f.get('label', f.get('name', '')) for f in next_batch[:3]]
+            if len(next_labels) > 1:
+                next_q = ', '.join(next_labels[:-1]) + f" and {next_labels[-1]}"
+            else:
+                next_q = next_labels[0] if next_labels else ""
+            message = f"No problem, I'll skip that. What's your {next_q}?"
+            next_questions = [{'name': f.get('name'), 'label': f.get('label'), 'type': f.get('type')} for f in next_batch]
+        else:
+            message = PersonalityConfig.get_completion_message()
+            next_questions = []
+        
+        await self._save_session(session)
+        
+        return AgentResponse(
+            message=message,
+            extracted_values={},
+            confidence_scores={},
+            needs_confirmation=[],
+            remaining_fields=new_remaining,
+            is_complete=len(new_remaining) == 0,
+            next_questions=next_questions
+        )
+    
+    def _generate_help_message(self, current_batch: List[Dict[str, Any]]) -> str:
+        """Generate contextual help message."""
+        if not current_batch:
+            return "Just answer naturally! For example, you can say 'My name is John' or give multiple answers at once like 'My name is John and my email is john@example.com'"
+        
+        field = current_batch[0]
+        label = field.get('label', field.get('name', 'information'))
+        field_type = field.get('type', 'text').lower()
+        
+        examples = {
+            'email': f"For {label}, say something like 'My email is sarah@example.com' or just 'sarah@example.com'",
+            'tel': f"For {label}, just say your number like '555-123-4567' or 'My phone is 555-123-4567'",
+            'text': f"For {label}, you can say '{label}: your value' or just tell me directly",
+        }
+        
+        if 'name' in label.lower():
+            return f"For {label}, you can say 'John Smith' or 'My name is John Smith'"
+        
+        return examples.get(field_type, 
+            f"For {label}, just tell me naturally. You can say 'My {label} is ...' or provide multiple answers at once!"
+        )
+    
+    async def _process_with_llm(
         self,
         session: ConversationSession,
         user_input: str,
         current_batch: List[Dict[str, Any]],
         remaining_fields: List[Dict[str, Any]]
     ) -> AgentResponse:
-        """Process input using LangChain LLM with Smart Context."""
+        """
+        Process input using LangChain LLM with Smart Context.
+        
+        Uses async invocation with exponential backoff retry for resilience.
+        """
         try:
             # Build intelligent context
             context = SmartContextBuilder.build_extraction_context(
@@ -1067,15 +1377,69 @@ class ConversationAgent:
                 HumanMessage(content=context)
             ]
             
-            response = self.llm.invoke(messages)
-            log_api_call("LangChain-Gemini", "invoke", success=True)
+            # Use async invoke with retry
+            response = await self._invoke_with_retry(messages)
+            log_api_call("LangChain-Gemini", "ainvoke", success=True)
             
             return self._parse_llm_response(response.content, remaining_fields)
             
         except Exception as e:
             logger.error(f"LLM processing error: {e}")
-            log_api_call("LangChain-Gemini", "invoke", success=False, error=str(e))
+            log_api_call("LangChain-Gemini", "ainvoke", success=False, error=str(e))
             return self._process_with_fallback(session, user_input, current_batch, remaining_fields)
+    
+    async def _invoke_with_retry(self, messages: List[Any]) -> Any:
+        """
+        Invoke LLM with exponential backoff retry.
+        
+        Args:
+            messages: List of LangChain messages
+            
+        Returns:
+            LLM response
+            
+        Raises:
+            Exception: If all retries fail
+        """
+        last_error = None
+        delay = LLM_RETRY_BASE_DELAY
+        
+        for attempt in range(LLM_MAX_RETRIES):
+            try:
+                # Use async invoke if available, otherwise fallback to sync
+                if hasattr(self.llm, 'ainvoke'):
+                    response = await self.llm.ainvoke(messages)
+                else:
+                    # Fallback to sync in thread pool
+                    loop = asyncio.get_event_loop()
+                    response = await loop.run_in_executor(
+                        None, 
+                        lambda: self.llm.invoke(messages)
+                    )
+                return response
+                
+            except Exception as e:
+                last_error = e
+                error_str = str(e).lower()
+                
+                # Check if error is retryable
+                retryable = any(keyword in error_str for keyword in [
+                    'rate limit', 'quota', 'timeout', 'connection',
+                    'temporary', '429', '503', '502', 'overloaded'
+                ])
+                
+                if not retryable or attempt == LLM_MAX_RETRIES - 1:
+                    raise
+                
+                logger.warning(
+                    f"LLM call failed (attempt {attempt + 1}/{LLM_MAX_RETRIES}), "
+                    f"retrying in {delay:.1f}s: {e}"
+                )
+                
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, LLM_RETRY_MAX_DELAY)
+        
+        raise last_error
     
     def _build_context(
         self,
