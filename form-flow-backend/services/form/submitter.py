@@ -125,14 +125,34 @@ class FormSubmitter:
             except:
                 continue
         
-        # Strategy 3: Partial text match on standard <select> options
+        # Strategy 3: Smart text match on standard <select> options
+        # Priority: exact match > starts with > shortest partial match
         try:
             options = await element.query_selector_all('option')
+            matches = []  # (priority, text, val_or_text)
+            value_lower = value.lower().strip()
+            
             for opt in options:
                 text, val = await opt.inner_text(), await opt.get_attribute('value')
-                if value.lower() in text.lower() or (val and value.lower() in val.lower()):
-                    await element.select_option(value=val or text)
-                    return True
+                text_lower = text.lower().strip()
+                val_lower = (val or '').lower().strip()
+                
+                # Priority 1: Exact match (case-insensitive)
+                if value_lower == text_lower or value_lower == val_lower:
+                    matches.append((0, len(text), text, val or text))
+                # Priority 2: Starts with
+                elif text_lower.startswith(value_lower) or val_lower.startswith(value_lower):
+                    matches.append((1, len(text), text, val or text))
+                # Priority 3: Partial match (prefer shorter options - less ambiguous)
+                elif value_lower in text_lower or value_lower in val_lower:
+                    matches.append((2, len(text), text, val or text))
+            
+            if matches:
+                # Sort by priority, then by length (shorter = better match)
+                matches.sort(key=lambda x: (x[0], x[1]))
+                best_match = matches[0]
+                await element.select_option(value=best_match[3])
+                return True
         except:
             pass
         
@@ -172,15 +192,29 @@ class FormSubmitter:
                         print(f"   ✓ Selected Ant Design dropdown option: {value}")
                         return True
                 
-                # Fallback: try partial match
+                # Fallback: Smart match (prefer exact > starts with > shortest partial)
                 options = await page.query_selector_all('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option')
+                matches = []
+                value_lower = value.lower().strip()
+                
                 for opt in options:
                     opt_text = await opt.inner_text()
-                    if value.lower() in opt_text.lower():
-                        await opt.click()
-                        await asyncio.sleep(0.3)
-                        print(f"   ✓ Selected Ant Design dropdown option (partial): {opt_text}")
-                        return True
+                    opt_text_lower = opt_text.lower().strip()
+                    
+                    if value_lower == opt_text_lower:
+                        matches.append((0, len(opt_text), opt, opt_text))
+                    elif opt_text_lower.startswith(value_lower):
+                        matches.append((1, len(opt_text), opt, opt_text))
+                    elif value_lower in opt_text_lower:
+                        matches.append((2, len(opt_text), opt, opt_text))
+                
+                if matches:
+                    matches.sort(key=lambda x: (x[0], x[1]))
+                    best = matches[0]
+                    await best[2].click()
+                    await asyncio.sleep(0.3)
+                    print(f"   ✓ Selected Ant Design dropdown option: {best[3]}")
+                    return True
                 
                 # Close dropdown if no option found
                 await page.keyboard.press('Escape')
@@ -363,15 +397,29 @@ class FormSubmitter:
                         print(f"   ✓ Selected Ant Design dropdown: {label} = {value}")
                         return True
                 
-                # Fallback: partial match
+                # Fallback: Smart match (prefer exact > starts with > shortest partial)
                 options = await page.query_selector_all('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option')
+                matches = []
+                value_lower = value.lower().strip()
+                
                 for opt in options:
                     opt_text = await opt.inner_text()
-                    if value.lower() in opt_text.lower():
-                        await opt.click()
-                        await asyncio.sleep(0.3)
-                        print(f"   ✓ Selected Ant Design dropdown (partial): {label} = {opt_text}")
-                        return True
+                    opt_text_lower = opt_text.lower().strip()
+                    
+                    if value_lower == opt_text_lower:
+                        matches.append((0, len(opt_text), opt, opt_text))
+                    elif opt_text_lower.startswith(value_lower):
+                        matches.append((1, len(opt_text), opt, opt_text))
+                    elif value_lower in opt_text_lower:
+                        matches.append((2, len(opt_text), opt, opt_text))
+                
+                if matches:
+                    matches.sort(key=lambda x: (x[0], x[1]))
+                    best = matches[0]
+                    await best[2].click()
+                    await asyncio.sleep(0.3)
+                    print(f"   ✓ Selected Ant Design dropdown: {label} = {best[3]}")
+                    return True
                 
                 # Close dropdown
                 await page.keyboard.press('Escape')

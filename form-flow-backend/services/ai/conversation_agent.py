@@ -1038,6 +1038,15 @@ class ConversationAgent:
             if f.get('name') in session.current_question_batch
         ]
         
+        # CRITICAL FIX: If current_batch is empty but we have remaining fields,
+        # populate the batch so extraction can work
+        if not current_batch and remaining_fields:
+            batches = self.clusterer.create_batches(remaining_fields)
+            if batches:
+                current_batch = batches[0]
+                session.current_question_batch = [f.get('name') for f in current_batch]
+                logger.debug(f"Auto-populated empty batch with: {session.current_question_batch}")
+        
         total_fields = session.get_total_field_count()
         extracted_count = len(session.extracted_fields)
         
@@ -1108,12 +1117,20 @@ class ConversationAgent:
         
         # Process with LLM or fallback
         logger.info(f"Processing input: '{sanitize_for_log(user_input[:100])}...'")
-        logger.debug(f"Current batch: {[f.get('name') for f in current_batch]}")
+        logger.info(f"Current batch fields: {[f.get('name') for f in current_batch]}")
+        logger.info(f"Remaining fields: {[f.get('name') for f in remaining_fields]}")
+        logger.info(f"LLM available: {self.llm is not None}, LangChain: {LANGCHAIN_AVAILABLE}")
         
         if self.llm and LANGCHAIN_AVAILABLE:
+            logger.info("Using LLM for extraction...")
             result = await self._process_with_llm(session, user_input, current_batch, remaining_fields)
+            logger.info(f"LLM extraction result: {len(result.extracted_values)} values extracted")
+            logger.info(f"Extracted values: {result.extracted_values}")
         else:
+            logger.info("Using FALLBACK extraction (LLM not available)...")
             result = self._process_with_fallback(session, user_input, current_batch, remaining_fields)
+            logger.info(f"Fallback extraction result: {len(result.extracted_values)} values extracted")
+            logger.info(f"Extracted values: {result.extracted_values}")
         
         # Update session with extracted values (REFINED)
         refined_values = self._refine_extracted_values(result.extracted_values, current_batch)

@@ -17,6 +17,7 @@ from services.ai.voice_processor import (
     FieldImportance,
     StreamingSpeechHandler,
     PartialUtterance,
+    PhoneticMatcher,  # NEW
 )
 
 
@@ -317,3 +318,183 @@ class TestStreamingSpeechHandler:
         
         assert result is not None
         assert "HINT" in result
+
+
+# =============================================================================
+# Enhanced VoiceInputProcessor Tests
+# =============================================================================
+
+class TestVoiceInputProcessorEnhanced:
+    """Tests for enhanced voice input features."""
+    
+    def test_normalize_name_simple(self):
+        """Test simple name normalization."""
+        result = VoiceInputProcessor.normalize_voice_input("john smith", 'name')
+        assert result == "John Smith"
+    
+    def test_normalize_name_hyphenated(self):
+        """Test hyphenated name normalization."""
+        result = VoiceInputProcessor.normalize_voice_input("mary-jane watson", 'name')
+        assert result == "Mary-Jane Watson"
+    
+    def test_normalize_name_apostrophe(self):
+        """Test name with apostrophe."""
+        result = VoiceInputProcessor.normalize_voice_input("john o'connor", 'name')
+        assert result == "John O'Connor"
+    
+    def test_normalize_date_month_day_year(self):
+        """Test date normalization with month day year."""
+        result = VoiceInputProcessor.normalize_voice_input("january 5 2024", 'date')
+        assert result == "01/05/2024"
+    
+    def test_normalize_date_ordinal(self):
+        """Test date with ordinal number."""
+        result = VoiceInputProcessor.normalize_voice_input("march fifth 2024", 'date')
+        assert result == "03/05/2024"
+    
+    def test_normalize_address_basic(self):
+        """Test basic address normalization."""
+        result = VoiceInputProcessor.normalize_voice_input("one two three main street", 'address')
+        assert "123" in result
+        assert "St" in result
+    
+    def test_normalize_address_with_directions(self):
+        """Test address with cardinal directions."""
+        result = VoiceInputProcessor.normalize_voice_input("north main street", 'address')
+        assert "N" in result
+    
+    def test_international_phone_with_context(self):
+        """Test international phone formatting with country context."""
+        result = VoiceInputProcessor.normalize_voice_input(
+            "nine eight seven six five four three two one zero",
+            'tel',
+            context={'country': 'India'}
+        )
+        assert "+91" in result
+    
+    def test_learning_from_correction(self):
+        """Test that the system learns from corrections."""
+        # Clear any previous corrections
+        VoiceInputProcessor._user_corrections.clear()
+        
+        # Learn a correction
+        VoiceInputProcessor.learn_from_correction(
+            "john at geemail dot com",
+            "john@gmail.com"
+        )
+        
+        # Check that correction was stored
+        assert "john at geemail dot com" in VoiceInputProcessor._user_corrections
+    
+    def test_context_parameter_backward_compatible(self):
+        """Test that context parameter is optional (backward compatible)."""
+        # Should work without context
+        result = VoiceInputProcessor.normalize_voice_input("john at gmail dot com", 'email')
+        assert "@" in result
+    
+    def test_tld_correction(self):
+        """Test TLD typo correction."""
+        result = VoiceInputProcessor.normalize_voice_input("john at gmail dot calm", 'email')
+        assert result == "john@gmail.com"
+    
+    def test_email_domain_autocomplete(self):
+        """Test email domain auto-completion."""
+        result = VoiceInputProcessor.normalize_voice_input("john at gmail", 'email')
+        assert result == "john@gmail.com"
+
+
+# =============================================================================
+# PhoneticMatcher Tests
+# =============================================================================
+
+class TestPhoneticMatcher:
+    """Tests for phonetic name matching."""
+    
+    def test_exact_match(self):
+        """Test exact name match."""
+        assert PhoneticMatcher.are_similar("John", "John") is True
+        assert PhoneticMatcher.are_similar("john", "JOHN") is True
+    
+    def test_phonetic_match_jon_john(self):
+        """Test phonetic match for Jon/John."""
+        assert PhoneticMatcher.are_similar("Jon", "John") is True
+    
+    def test_phonetic_match_stephen_steven(self):
+        """Test phonetic match for Stephen/Steven."""
+        assert PhoneticMatcher.are_similar("Stephen", "Steven") is True
+    
+    def test_phonetic_different_names(self):
+        """Test that different names don't match."""
+        assert PhoneticMatcher.are_similar("John", "Mary", threshold=0.9) is False
+    
+    def test_phonetic_key_generation(self):
+        """Test phonetic key generation."""
+        key1 = PhoneticMatcher.get_phonetic_key("Robert")
+        key2 = PhoneticMatcher.get_phonetic_key("Rupert")
+        # Both should start with 'r'
+        assert key1[0] == key2[0] == 'r'
+    
+    def test_find_best_match(self):
+        """Test finding best match from candidates."""
+        candidates = ["John Smith", "Jane Doe", "Michael Johnson"]
+        result = PhoneticMatcher.find_best_match("Jon Smith", candidates)
+        assert result == "John Smith"
+
+
+# =============================================================================
+# Multi-Signal Confidence Tests
+# =============================================================================
+
+class TestMultiSignalConfidence:
+    """Tests for multi-signal confidence calculation."""
+    
+    def test_valid_email_increases_confidence(self):
+        """Test that valid email format increases confidence."""
+        confidence = ConfidenceCalibrator.calculate_confidence(
+            field_name="email",
+            field_type="email",
+            extracted_value="john@gmail.com",
+            stt_confidence=0.80
+        )
+        assert confidence > 0.80  # Should be boosted
+    
+    def test_invalid_email_decreases_confidence(self):
+        """Test that invalid email format decreases confidence."""
+        confidence = ConfidenceCalibrator.calculate_confidence(
+            field_name="email",
+            field_type="email",
+            extracted_value="johngmail",  # No @ sign
+            stt_confidence=0.80
+        )
+        assert confidence < 0.80  # Should be reduced
+    
+    def test_valid_phone_increases_confidence(self):
+        """Test that valid phone format increases confidence."""
+        confidence = ConfidenceCalibrator.calculate_confidence(
+            field_name="phone",
+            field_type="tel",
+            extracted_value="(555) 123-4567",
+            stt_confidence=0.80
+        )
+        assert confidence > 0.80  # Should be boosted
+    
+    def test_confidence_bounded(self):
+        """Test that confidence is bounded between 0 and 1."""
+        # Very high base confidence
+        confidence = ConfidenceCalibrator.calculate_confidence(
+            field_name="email",
+            field_type="email",
+            extracted_value="john@gmail.com",
+            stt_confidence=0.99
+        )
+        assert confidence <= 1.0
+        
+        # Very low base confidence
+        confidence = ConfidenceCalibrator.calculate_confidence(
+            field_name="email",
+            field_type="email",
+            extracted_value="invalid",
+            stt_confidence=0.10
+        )
+        assert confidence >= 0.0
+
