@@ -160,8 +160,7 @@ class TestConfidenceCalibrator:
     def test_should_confirm_critical_low_confidence(self):
         """Critical fields with low confidence should require confirmation."""
         should_confirm = ConfidenceCalibrator.should_confirm(
-            field_name="email",
-            field_type="email",
+            field={"name": "email", "type": "email"},
             confidence=0.70  # Below critical threshold of 0.90
         )
         assert should_confirm is True
@@ -169,8 +168,7 @@ class TestConfidenceCalibrator:
     def test_should_not_confirm_high_confidence(self):
         """High confidence should not require confirmation."""
         should_confirm = ConfidenceCalibrator.should_confirm(
-            field_name="email",
-            field_type="email",
+            field={"name": "email", "type": "email"},
             confidence=0.95  # Above critical threshold
         )
         assert should_confirm is False
@@ -178,9 +176,18 @@ class TestConfidenceCalibrator:
     def test_frustration_lowers_threshold(self):
         """Frustrated users should have lower confirmation threshold."""
         # Normal: 0.85 confidence would need confirmation for critical field
-        normal = ConfidenceCalibrator.should_confirm("email", "email", 0.85)
+        normal = ConfidenceCalibrator.should_confirm({"name": "email", "type": "email"}, 0.85)
+        
         # Frustrated: same confidence should NOT need confirmation
-        frustrated = ConfidenceCalibrator.should_confirm("email", "email", 0.85, is_frustrated=True)
+        class MockContext:
+            def is_frustrated(self): return True
+            repeated_corrections = {}
+            
+        frustrated = ConfidenceCalibrator.should_confirm(
+            {"name": "email", "type": "email"}, 
+            0.85, 
+            context=MockContext()
+        )
         
         # With frustration, threshold drops by 0.10, so 0.85 > 0.80, no confirm needed
         assert normal is True

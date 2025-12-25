@@ -910,38 +910,53 @@ class ConfidenceCalibrator:
     @classmethod
     def should_confirm(
         cls,
-        field_name: str,
-        field_type: str,
+        field: Dict[str, Any],
         confidence: float,
-        is_frustrated: bool = False,
-        correction_count: int = 0
+        context: Optional[Any] = None,  # Avoid circular import, pass ConversationContext
+        stt_confidence: float = 1.0,
+        is_voice: bool = False
     ) -> bool:
         """
         Determine if we should confirm this extraction.
-        
-        Args:
-            field_name: Name of the field
-            field_type: Type of the field
-            confidence: Extraction confidence (0-1)
-            is_frustrated: Is user showing frustration
-            correction_count: How many times this field was corrected
-            
-        Returns:
-            True if we should ask for confirmation
         """
+        field_name = field.get('name', 'unknown')
+        field_type = field.get('type', 'text')
+        
+        # Get field importance using existing class logic
         importance = cls.get_field_importance(field_name, field_type)
-        threshold = cls.BASE_THRESHOLDS[importance]
         
-        # Reduce threshold if user is frustrated (be more lenient)
+        # Get base threshold for this importance level
+        threshold = cls.BASE_THRESHOLDS.get(importance, 0.75)
+        
+        # Adjust based on user context
+        is_frustrated = False
+        correction_count = 0
+        
+        if context:
+            # Handle ConversationContext object
+            if hasattr(context, 'is_frustrated'):
+                is_frustrated = context.is_frustrated()
+            if hasattr(context, 'repeated_corrections'):
+                correction_count = context.repeated_corrections.get(field_name, 0)
+        
         if is_frustrated:
-            threshold -= 0.10
-        
-        # Reduce further if they've corrected before (don't annoy them)
+            # Lower threshold to avoid annoying them further
+            threshold -= 0.15
+            logger.debug("Lowering threshold due to frustration")
+            
         if correction_count > 0:
-            threshold -= 0.05 * min(correction_count, 2)
-        
+            # Higher threshold if they've already corrected this field once
+            threshold += 0.10
+            logger.debug(f"Raising threshold due to previous corrections ({correction_count})")
+            
+        # Voice specific adjustments
+        if is_voice and stt_confidence < 0.9:
+            # If STT wasn't confident, we should be more careful
+            threshold += 0.1
+            logger.debug(f"Raising threshold due to low STT confidence ({stt_confidence:.2f})")
+            
         return confidence < threshold
-    
+
     @classmethod
     def generate_confirmation_prompt(
         cls,
@@ -1050,9 +1065,9 @@ class ConfidenceCalibrator:
         NEW: Check if value is consistent with context.
         
         Example: If email domain is "company.com" and company name
-        is "Company Inc", that's consistent.
+        is "Company Inc", that is consistent.
         """
-        if field_type == 'email' and 'company' in context:
+        if field_type == 'email' and context and 'company' in context:
             company = context['company']
             if company:
                 company_clean = company.lower().replace(' ', '').replace('inc', '').replace('llc', '')
@@ -1060,6 +1075,7 @@ class ConfidenceCalibrator:
                     domain = value.split('@')[1].split('.')[0].lower()
                     # Check if company name appears in domain
                     return company_clean.startswith(domain) or domain.startswith(company_clean[:3])
+        return True
         
         return False
     
@@ -1083,7 +1099,7 @@ class ConfidenceCalibrator:
 
 class MultiModalFallback:
     """
-    Know when voice isn't working and offer alternatives.
+    Know when voice is not working and offer alternatives.
     
     After repeated failures, suggest:
     - Typing instead
