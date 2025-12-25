@@ -1039,7 +1039,23 @@ class ConversationAgent:
         session.field_attempt_counts[field_name] = session.field_attempt_counts.get(field_name, 0) + 1
         failure_count = session.field_attempt_counts[field_name]
         
-        # Check if fallback should be offered
+        # For attempts 1-3, use ClarificationStrategy for escalating help
+        if failure_count <= 3:
+            clarification = ClarificationStrategy.get_clarification(
+                field, failure_count, None  # last_input not needed for now
+            )
+            return AgentResponse(
+                message=clarification,
+                extracted_values={},
+                confidence_scores={},
+                needs_confirmation=[],
+                remaining_fields=remaining_fields,
+                is_complete=False,
+                next_questions=[{'name': field.get('name'), 'label': field.get('label'), 'type': field.get('type')}],
+                fallback_options=[]
+            )
+        
+        # After 3 failed clarifications, offer multi-modal fallback
         if MultiModalFallback.should_offer_fallback(field_name, field_type, failure_count):
             fallback = MultiModalFallback.generate_fallback_response(field_name)
             
@@ -1055,6 +1071,115 @@ class ConversationAgent:
             )
         
         return None
+    
+    def _detect_user_style(self, user_input: str, session: ConversationSession) -> None:
+        """
+        Detect and update user preference style from input patterns.
+        
+        Called early in process_user_input to learn user preferences.
+        """
+        words = user_input.split()
+        lower = user_input.lower()
+        
+        # Very short, direct answers suggest concise preference
+        if len(words) <= 3 and not any(w in lower for w in ['please', 'could', 'would']):
+            if session.conversation_context.user_preference_style == 'balanced':
+                session.conversation_context.user_preference_style = 'concise'
+        
+        # Polite language suggests formal preference
+        elif any(w in lower for w in ['please', 'thank you', 'would you', 'could you']):
+            session.conversation_context.user_preference_style = 'formal'
+        
+        # Casual markers
+        elif any(w in lower for w in ['hey', 'yo', 'cool', 'sure', 'yep', 'nope', 'yeah']):
+            session.conversation_context.user_preference_style = 'casual'
+        
+        # Long, detailed responses suggest detailed preference
+        elif len(words) > 15:
+            session.conversation_context.user_preference_style = 'detailed'
+    
+    def _adapt_response(self, message: str, session: ConversationSession) -> str:
+        """
+        Adapt response message based on user preference style.
+        
+        Args:
+            message: Original response message
+            session: Session with conversation context
+            
+        Returns:
+            Style-adapted message
+        """
+        style = session.conversation_context.user_preference_style
+        
+        if style == 'concise':
+            return self._make_concise(message)
+        elif style == 'casual':
+            return self._make_casual(message)
+        elif style == 'formal':
+            return self._make_formal(message)
+        # 'detailed' or 'balanced' - keep original
+        return message
+    
+    def _make_concise(self, message: str) -> str:
+        """Shorten message for concise preference users."""
+        # Remove filler phrases
+        fillers = [
+            "I'd be happy to help with that. ",
+            "Let me help you with that. ",
+            "Perfect! ",
+            "Great! ",
+            "Awesome! ",
+            "Wonderful! ",
+            "That's great. ",
+            "Thank you for that. ",
+        ]
+        result = message
+        for filler in fillers:
+            result = result.replace(filler, "")
+        
+        # Shorten common phrases
+        replacements = [
+            ("Could you please provide", "What's"),
+            ("Would you mind telling me", "What's"),
+            ("Can you tell me", "What's"),
+            ("I've recorded your", "Got"),
+            ("I've saved your", "Got"),
+            ("What would you like to enter instead?", "New value?"),
+        ]
+        for old, new in replacements:
+            result = result.replace(old, new)
+        
+        return result.strip()
+    
+    def _make_casual(self, message: str) -> str:
+        """Add casual tone for casual preference users."""
+        replacements = [
+            ("Thank you", "Thanks"),
+            ("I have recorded", "Got"),
+            ("Could you please", "Can you"),
+            ("Would you mind", "Could you"),
+            ("What is your", "What's your"),
+            ("I would", "I'd"),
+        ]
+        result = message
+        for old, new in replacements:
+            result = result.replace(old, new)
+        return result
+    
+    def _make_formal(self, message: str) -> str:
+        """Add formal tone for formal preference users."""
+        replacements = [
+            ("Got it", "Thank you"),
+            ("Thanks", "Thank you"),
+            ("What's", "What is"),
+            ("I'd", "I would"),
+            ("don't", "do not"),
+            ("can't", "cannot"),
+        ]
+        result = message
+        for old, new in replacements:
+            result = result.replace(old, new)
+        return result
     
     async def process_user_input(
         self, 
@@ -1133,6 +1258,9 @@ class ConversationAgent:
                 logger.info(f"Voice normalized: '{original_input}' -> '{user_input}'")
         
         # --- INTENT RECOGNITION ---
+        
+        # Detect user style from input patterns
+        self._detect_user_style(user_input, session)
         
         # Detect user intent
         intent_recognizer = IntentRecognizer()
@@ -1268,6 +1396,9 @@ class ConversationAgent:
             milestone = ProgressTracker.get_milestone_message(new_extracted_count, total_fields, include_count=False)
             if milestone:
                 adaptive_message = f"{milestone} {adaptive_message}"
+        
+        # Apply style adaptation based on user preference
+        adaptive_message = self._adapt_response(adaptive_message, session)
         
         result.message = adaptive_message
         
