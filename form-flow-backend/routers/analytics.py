@@ -12,8 +12,8 @@ from collections import defaultdict
 import os
 
 from core.database import get_db
-from core.models import User, Submission
-from routers.auth import get_current_user
+from core.models import User, FormSubmission
+import auth as auth_utils
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/analytics", tags=["Analytics"])
 
 @router.get("/dashboard")
 async def get_dashboard_analytics(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(auth_utils.get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -96,7 +96,7 @@ async def get_dashboard_analytics(
         raise HTTPException(status_code=500, detail="Failed to generate analytics")
 
 
-def _get_submissions_by_day(submissions: List[Submission]) -> List[Dict[str, Any]]:
+def _get_submissions_by_day(submissions: List[FormSubmission]) -> List[Dict[str, Any]]:
     """Get submission counts grouped by day for the last 7 days."""
     today = datetime.now().date()
     days = []
@@ -112,7 +112,7 @@ def _get_submissions_by_day(submissions: List[Submission]) -> List[Dict[str, Any
     return days
 
 
-def _get_success_by_type(submissions: List[Submission]) -> List[Dict[str, Any]]:
+def _get_success_by_type(submissions: List[FormSubmission]) -> List[Dict[str, Any]]:
     """Categorize submissions by form type and success rate."""
     type_stats = defaultdict(lambda: {"success": 0, "fail": 0})
     
@@ -139,7 +139,7 @@ def _get_success_by_type(submissions: List[Submission]) -> List[Dict[str, Any]]:
     ]
 
 
-def _get_top_domains(submissions: List[Submission]) -> List[Dict[str, Any]]:
+def _get_top_domains(submissions: List[FormSubmission]) -> List[Dict[str, Any]]:
     """Get top 5 most frequent domains from submissions."""
     from urllib.parse import urlparse
     
@@ -165,7 +165,7 @@ def _get_top_domains(submissions: List[Submission]) -> List[Dict[str, Any]]:
     return [{"name": domain, "value": count} for domain, count in sorted_domains]
 
 
-def _get_activity_by_hour(submissions: List[Submission]) -> List[Dict[str, Any]]:
+def _get_activity_by_hour(submissions: List[FormSubmission]) -> List[Dict[str, Any]]:
     """Get submission activity count by hour of day (0-23)."""
     hour_counts = defaultdict(int)
     

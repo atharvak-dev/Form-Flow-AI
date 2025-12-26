@@ -53,7 +53,7 @@ function Hero({ url, setUrl, handleSubmit, loading }) {
                             </span>
                         </h1>
 
-                        <p className={`text-lg md:text-xl leading-relaxed tracking-tight max-w-2xl text-center ${isDark ? 'text-zinc-400' : 'text-zinc-950'}`}>
+                        <p className={`text-lg md:text-xl leading-relaxed tracking-tight max-w-2xl text-center font-medium ${isDark ? 'text-zinc-400' : 'text-zinc-600'}`}>
                             Revolutionizing online form completion with voice AI. Simply paste any form URL and let our intelligent assistant guide you through with natural conversation.
                         </p>
                     </div>

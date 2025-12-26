@@ -127,40 +127,43 @@ const DEFAULT_CUSTOMIZATIONS = {
 const ThemeContext = createContext(null);
 
 export const ThemeProvider = ({ children }) => {
-    const [themeName, setThemeName] = useState('default');
-    const [customizations, setCustomizations] = useState(DEFAULT_CUSTOMIZATIONS);
-    const [isInitialized, setIsInitialized] = useState(false);
-
-    // Load saved preferences
-    useEffect(() => {
+    // Lazy initialize state from localStorage to prevent theme flash
+    const [themeName, setThemeName] = useState(() => {
         try {
             const saved = localStorage.getItem('formflow-theme-prefs');
             if (saved) {
-                const prefs = JSON.parse(saved);
-                setThemeName(prefs.theme || 'default');
-                setCustomizations({
-                    ...DEFAULT_CUSTOMIZATIONS,
-                    ...prefs.customizations
-                });
-            } else {
-                // Only check system preference if no saved preference
-                // Comment this out to always default to light mode
-                // const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-                // if (prefersDark) {
-                //     setThemeName('dark');
-                // }
-
-                // Check for reduced motion preference
-                const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-                if (prefersReducedMotion) {
-                    setCustomizations(c => ({ ...c, animationsEnabled: false }));
-                }
+                return JSON.parse(saved).theme || 'default';
             }
         } catch (e) {
-            console.warn('Could not load theme preferences:', e);
+            console.warn('Error reading theme from localStorage', e);
         }
-        setIsInitialized(true);
-    }, []);
+        return 'default';
+    });
+
+    const [customizations, setCustomizations] = useState(() => {
+        try {
+            const saved = localStorage.getItem('formflow-theme-prefs');
+            if (saved) {
+                return {
+                    ...DEFAULT_CUSTOMIZATIONS,
+                    ...JSON.parse(saved).customizations
+                };
+            }
+        } catch (e) {
+            console.warn('Error reading customizations from localStorage', e);
+        }
+
+        // Check for reduced motion if no preference saved
+        const prefersReducedMotion = typeof window !== 'undefined' &&
+            window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        return {
+            ...DEFAULT_CUSTOMIZATIONS,
+            animationsEnabled: !prefersReducedMotion
+        };
+    });
+
+    const [isInitialized, setIsInitialized] = useState(true);
 
     // Apply theme to document - runs immediately and on every theme change
     useEffect(() => {
