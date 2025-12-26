@@ -102,6 +102,14 @@ export const getSubmissionHistory = async () => {
     return response.data;
 };
 
+/**
+ * Get dashboard analytics with charts and AI insights
+ */
+export const getAnalytics = async () => {
+    const response = await api.get('/analytics/dashboard');
+    return response.data;
+};
+
 // ============ Voice APIs ============
 
 /**
