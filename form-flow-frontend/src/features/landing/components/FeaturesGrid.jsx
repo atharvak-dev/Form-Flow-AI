@@ -148,6 +148,7 @@ const AccessibilityAnim = memo(function AccessibilityAnim() {
 // (I will just copy them to be safe, but with minor style tweaks to match new aesthetic)
 
 const SpeedMetric = memo(function SpeedMetric() {
+    const { isDark } = useTheme();
     const [progress, setProgress] = useState(0);
     const [isVisible, setIsVisible] = useState(false);
 
@@ -183,10 +184,10 @@ const SpeedMetric = memo(function SpeedMetric() {
                     />
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-2xl font-bold text-zinc-900 dark:text-white">0.2s</span>
+                    <span className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-black'}`}>0.2s</span>
                 </div>
             </div>
-            <div className="flex items-center gap-2 px-3 py-1 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/50 text-emerald-700 dark:text-emerald-400 rounded-full text-xs font-medium backdrop-blur-sm">
+            <div className="flex items-center gap-2 px-3 py-1 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/50 text-emerald-800 dark:text-emerald-400 rounded-full text-xs font-medium backdrop-blur-sm">
                 <Zap className="w-3 h-3 fill-emerald-700 dark:fill-emerald-400" />
                 <span>Instant Execution</span>
             </div>
@@ -314,8 +315,8 @@ const FeatureCard = memo(function FeatureCard({ children, className, title, desc
                             <Icon className={`w-5 h-5 transition-colors duration-300 ${isDark ? 'text-zinc-300 group-hover:text-emerald-400' : 'text-zinc-600 group-hover:text-emerald-600'}`} />
                         </div>
                     </div>
-                    <h3 className={`text-xl font-semibold mb-2 transition-colors ${isDark ? 'text-zinc-100 group-hover:text-emerald-400' : 'text-zinc-900 group-hover:text-emerald-700'}`}>{title}</h3>
-                    <p className={`text-sm leading-relaxed font-medium ${isDark ? 'text-zinc-400' : 'text-zinc-600'}`}>{description}</p>
+                    <h3 className={`text-xl font-semibold mb-2 transition-colors ${isDark ? 'text-zinc-100 group-hover:text-emerald-400' : 'text-zinc-950 group-hover:text-emerald-700'}`}>{title}</h3>
+                    <p className={`text-sm leading-relaxed font-medium ${isDark ? 'text-zinc-400' : 'text-zinc-800'}`}>{description}</p>
                 </div>
             </div>
         </motion.div>
@@ -331,11 +332,11 @@ function FeaturesGrid() {
     // Theme Variables - Enhanced for "Premium" look
     const sectionBg = isDark ? "bg-[#09090b]" : "bg-white"; // Deep black instead of zinc-950
     const voiceCardBg = isDark ? "bg-zinc-900/60 border border-zinc-800/50 backdrop-blur-md" : "bg-white border border-zinc-200 shadow-xl shadow-zinc-200/40";
-    const voiceCardText = isDark ? "text-white" : "text-zinc-900";
-    const voiceCardDesc = isDark ? "text-zinc-400" : "text-zinc-600";
+    const voiceCardText = isDark ? "text-white" : "text-zinc-950";
+    const voiceCardDesc = isDark ? "text-zinc-400" : "text-zinc-900";
     const voiceBadgeBg = isDark ? "bg-zinc-800/80 backdrop-blur-sm" : "bg-zinc-100";
     const voiceBadgeBorder = isDark ? "border-zinc-700" : "border-zinc-200";
-    const voiceBadgeText = isDark ? "text-emerald-400" : "text-emerald-700";
+    const voiceBadgeText = isDark ? "text-emerald-400" : "text-emerald-800";
 
     return (
         <section className={`${sectionBg} px-4 md:px-6 py-32 flex items-center justify-center relative overflow-hidden transition-colors duration-700`}>
@@ -348,13 +349,13 @@ function FeaturesGrid() {
                 </>
             )}
 
-            <div className="max-w-[1400px] w-full mx-auto relative z-10">
+            <div className="max-w-7xl mx-auto px-6 relative z-10">
 
                 {/* Header Section */}
                 <div className="mb-24 flex flex-col md:flex-row md:items-end justify-between gap-8 md:gap-20">
                     <div className="max-w-2xl">
                         <motion.div
-                            className={`inline-flex items-center gap-2 px-3 py-1 rounded-full ${isDark ? 'bg-zinc-900/50 border-zinc-800 text-zinc-400' : 'bg-zinc-100 border-zinc-200 text-zinc-600'} border text-xs font-semibold uppercase tracking-wider mb-6 backdrop-blur-sm`}
+                            className={`inline-flex items-center gap-2 px-3 py-1 rounded-full ${isDark ? 'bg-zinc-900/50 border-zinc-800 text-zinc-400' : 'bg-zinc-100 border-zinc-200 text-zinc-900'} border text-xs font-semibold uppercase tracking-wider mb-6 backdrop-blur-sm`}
                             initial={{ opacity: 0, y: 20 }}
                             whileInView={{ opacity: 1, y: 0 }}
                             viewport={{ once: true }}
@@ -364,18 +365,18 @@ function FeaturesGrid() {
                         </motion.div>
 
                         <motion.h2
-                            className="text-4xl md:text-6xl font-semibold text-zinc-900 dark:text-white tracking-tight leading-[1.1]"
+                            className={`text-4xl md:text-6xl font-semibold tracking-tight leading-[1.1] ${isDark ? 'text-white' : 'text-black'}`}
                             initial={{ opacity: 0, y: 20 }}
                             whileInView={{ opacity: 1, y: 0 }}
                             viewport={{ once: true }}
                             transition={{ delay: 0.1 }}
                         >
-                            Built for speed, <span className="text-zinc-400 dark:text-zinc-600">accessibility & scale.</span>
+                            Built for speed, <span className={isDark ? 'text-zinc-400' : 'text-zinc-800'}>accessibility & scale.</span>
                         </motion.h2>
                     </div>
 
                     <motion.p
-                        className="text-lg text-zinc-600 dark:text-zinc-400 max-w-md leading-relaxed mb-1"
+                        className="text-lg text-zinc-900 dark:text-zinc-400 max-w-md leading-relaxed mb-1"
                         initial={{ opacity: 0, y: 20 }}
                         whileInView={{ opacity: 1, y: 0 }}
                         viewport={{ once: true }}
@@ -459,7 +460,7 @@ function FeaturesGrid() {
                                     Just say the word. Our voice agent parses your intent from natural language and executes complex form filling tasks hands-free.
                                 </p>
 
-                                <div className="mt-8 flex flex-col md:flex-row items-center gap-4 text-sm font-medium text-zinc-600 dark:text-zinc-300">
+                                <div className="mt-8 flex flex-col md:flex-row items-center gap-4 text-sm font-medium text-zinc-900 dark:text-zinc-300">
                                     <div className="flex items-center gap-2">
                                         <CheckCircle2 className="w-4 h-4 text-emerald-500" />
                                         <span>High Accuracy ASR</span>

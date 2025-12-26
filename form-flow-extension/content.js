@@ -310,17 +310,27 @@
             // Create container
             this.container = document.createElement('div');
             this.container.id = 'formflow-overlay-root';
-            // CSS for container
+            // CSS for container - Force bottom-right positioning with explicit resets
             this.container.style.cssText = `
-                position: fixed;
-                bottom: 30px;
-                right: 30px;
-                z-index: ${CONFIG.OVERLAY_Z_INDEX};
-                font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                display: flex;
-                flex-direction: column;
-                align-items: flex-end;
-                pointer-events: none;
+                position: fixed !important;
+                bottom: 30px !important;
+                right: 30px !important;
+                left: auto !important;
+                top: auto !important;
+                z-index: 2147483647 !important;
+                font-family: 'Inter', system-ui, -apple-system, sans-serif !important;
+                display: flex !important;
+                flex-direction: column !important;
+                align-items: flex-end !important;
+                pointer-events: none !important;
+                transform: none !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                border: none !important;
+                background: transparent !important;
+                width: auto !important;
+                height: auto !important;
+                box-shadow: none !important;
             `;
 
             const shadow = this.container.attachShadow({ mode: 'open' });
@@ -711,7 +721,7 @@
             this.chatHistory.onscroll = () => this.checkScrollPosition();
 
             this.initSpeechRecognition();
-            document.body.appendChild(this.container);
+            (document.documentElement || document.body).appendChild(this.container);
         }
 
         togglePanel() {
