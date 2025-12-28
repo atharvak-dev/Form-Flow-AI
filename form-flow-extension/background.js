@@ -16,8 +16,40 @@ const CONFIG = {
 };
 
 // State
+// State
 let activeSessions = new Map(); // tab_id -> session_data
-let reconnectAttempts = 0;
+
+// Restore sessions from storage on startup
+restoreSessions().then(() => {
+    console.log('Sessions restored. Active tabs:', [...activeSessions.keys()]);
+});
+
+async function restoreSessions() {
+    try {
+        const result = await chrome.storage.session.get('activeSessions');
+        if (result.activeSessions) {
+            activeSessions = new Map(Object.entries(JSON.parse(result.activeSessions)));
+            // Convert string keys back to numbers if needed (tabIds are numbers)
+            // JSON object keys are always strings
+            const map = new Map();
+            for (const [key, value] of activeSessions) {
+                map.set(Number(key), value);
+            }
+            activeSessions = map;
+        }
+    } catch (e) {
+        console.warn('Failed to restore sessions:', e);
+    }
+}
+
+async function persistSessions() {
+    try {
+        const obj = Object.fromEntries(activeSessions);
+        await chrome.storage.session.set({ 'activeSessions': JSON.stringify(obj) });
+    } catch (e) {
+        console.error('Failed to persist sessions:', e);
+    }
+}
 
 // =============================================================================
 // Message Handling
@@ -34,6 +66,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 async function handleMessage(message, sender) {
+    // Ensure sessions are loaded before processing
+    if (activeSessions.size === 0) {
+        await restoreSessions();
+    }
+
     const tabId = sender.tab?.id;
 
     switch (message.type) {
@@ -94,6 +131,8 @@ async function startSession(tabId, formSchema, formUrl) {
             createdAt: Date.now()
         });
 
+        await persistSessions();
+
         console.log('Session created:', data.session_id);
 
         return {
@@ -139,6 +178,7 @@ async function sendUserMessage(tabId, text) {
 
         // Update local state
         Object.assign(session.extractedFields, data.extracted_values);
+        await persistSessions();
 
         return {
             success: true,
@@ -171,6 +211,7 @@ async function endSession(tabId) {
 
         const data = await response.json();
         activeSessions.delete(tabId);
+        await persistSessions();
 
         return {
             success: true,
@@ -181,6 +222,7 @@ async function endSession(tabId) {
     } catch (error) {
         // Still remove local session even if backend fails
         activeSessions.delete(tabId);
+        await persistSessions();
         return { success: true, message: 'Session ended locally' };
     }
 }

@@ -186,7 +186,8 @@ class ConversationAgent:
         """
         validate_form_schema(form_schema)
         
-        session = ConversationSession(
+        # Use factory method for backward compatible construction
+        session = ConversationSession.create(
             id=str(uuid.uuid4()),
             form_schema=form_schema,
             form_url=form_url,

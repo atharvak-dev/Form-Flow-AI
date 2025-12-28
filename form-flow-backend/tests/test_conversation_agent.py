@@ -269,7 +269,7 @@ class TestConversationSession:
     
     def test_session_serialization(self, sample_form_schema):
         """Test session to_dict and from_dict."""
-        original = ConversationSession(
+        original = ConversationSession.create(
             id="test-123",
             form_schema=sample_form_schema,
             form_url="https://example.com",
@@ -371,7 +371,7 @@ class TestConversationAgent:
     
     def test_get_remaining_fields(self, agent, sample_form_schema):
         """Test remaining fields calculation."""
-        session = ConversationSession(
+        session = ConversationSession.create(
             id="test-123",
             form_schema=sample_form_schema,
             form_url="",

@@ -66,7 +66,7 @@
          */
         extractFormSchema(form, index) {
             const fields = [];
-            const inputs = form.querySelectorAll('input, select, textarea');
+            const inputs = form.querySelectorAll('input, select, textarea, [role="combobox"]');
 
             inputs.forEach(input => {
                 const field = this.extractFieldInfo(input);
@@ -87,7 +87,7 @@
          * Extract formless inputs (not inside a form tag)
          */
         extractFormlessInputs() {
-            const allInputs = document.querySelectorAll('input, select, textarea');
+            const allInputs = document.querySelectorAll('input, select, textarea, [role="combobox"]');
             const formlessInputs = Array.from(allInputs).filter(input => !input.closest('form'));
 
             const fields = formlessInputs
@@ -139,6 +139,25 @@
                     value: opt.value,
                     text: opt.text
                 }));
+            }
+
+            // Add options for custom comboboxes (try to find associated listbox)
+            if (element.getAttribute('role') === 'combobox') {
+                field.type = 'select'; // Treat as select
+                // Try to find options from aria-controls or standard patterns
+                const listboxId = element.getAttribute('aria-controls');
+                if (listboxId) {
+                    const listbox = document.getElementById(listboxId);
+                    if (listbox) {
+                        const options = listbox.querySelectorAll('[role="option"]');
+                        if (options.length) {
+                            field.options = Array.from(options).map(opt => ({
+                                value: opt.getAttribute('data-value') || opt.textContent.trim(),
+                                text: opt.textContent.trim()
+                            }));
+                        }
+                    }
+                }
             }
 
             // Add options for radio/checkbox groups
@@ -635,114 +654,134 @@
 
                 @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 
-                /* Prompt Input Box */
+                /* Prompt Input Box (Redesigned) */
                 .prompt-box {
                     background: var(--bg-dark);
                     border-top: 1px solid var(--border-dark);
-                    padding: 16px;
+                    padding: 24px;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    gap: 16px;
                     transition: border-color 0.3s ease;
+                    position: relative;
+                    overflow: visible;
                 }
                 
-                .prompt-box.recording { border-color: rgba(239, 68, 68, 0.6); }
+                .prompt-box.recording { border-color: rgba(239, 68, 68, 0.4); }
 
-                .input-wrapper {
+                /* Central Mic */
+                .mic-container {
+                    position: relative;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    height: 100px;
+                    width: 100%;
+                }
+
+                .main-mic-btn {
+                    width: 80px;
+                    height: 80px;
+                    border-radius: 50%;
                     background: #262626;
                     border: 1px solid var(--border-dark);
-                    border-radius: 12px;
-                    padding: 8px 12px;
-                    transition: border-color 0.2s;
-                }
-                .input-wrapper:focus-within { border-color: #444; }
-
-                .input-area {
-                    width: 100%;
-                    min-height: 24px;
-                    max-height: 120px;
-                    background: transparent;
-                    border: none;
-                    color: var(--text-primary);
-                    font-size: 14px;
-                    line-height: 1.5;
-                    resize: none;
-                    font-family: inherit;
-                }
-                .input-area::placeholder { color: #6b7280; }
-
-                /* Actions Row */
-                .actions-row { 
-                    display: flex; 
-                    align-items: center; 
-                    justify-content: space-between; 
-                    padding-top: 10px; 
-                }
-                
-                .left-actions { display: flex; align-items: center; gap: 4px; }
-                .right-actions { display: flex; align-items: center; gap: 8px; }
-
-                .icon-only-btn {
-                    width: 36px;
-                    height: 36px;
-                    border-radius: 8px;
-                    border: none;
-                    background: transparent;
-                    color: var(--text-secondary);
+                    color: var(--primary);
                     display: flex;
                     align-items: center;
                     justify-content: center;
                     cursor: pointer;
-                    transition: all 0.2s;
+                    z-index: 10;
+                    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
                 }
-                .icon-only-btn:hover { background: rgba(255,255,255,0.05); color: var(--text-primary); }
-                .icon-only-btn svg { width: 18px; height: 18px; }
 
-                /* Send Button */
-                .send-btn {
-                    height: 36px;
-                    padding: 0 16px;
-                    border-radius: 8px;
-                    border: none;
+                .main-mic-btn:hover {
+                    transform: scale(1.1);
                     background: #333;
-                    color: var(--text-secondary);
-                    font-size: 13px;
-                    font-weight: 500;
-                    cursor: pointer;
-                    display: flex;
-                    align-items: center;
-                    gap: 6px;
-                    transition: all 0.2s;
+                    box-shadow: 0 15px 40px rgba(0,0,0,0.4);
                 }
-                .send-btn:hover { background: #444; color: var(--text-primary); }
-                .send-btn.active { background: white; color: black; }
-                .send-btn.active:hover { background: rgba(255,255,255,0.9); }
-                .send-btn svg { width: 14px; height: 14px; }
 
-                /* Mic Button Recording State */
-                .icon-only-btn.recording { 
+                .main-mic-btn svg { width: 32px; height: 32px; }
+
+                /* Recording State - Crazy Animations */
+                .main-mic-btn.recording {
+                    background: linear-gradient(135deg, #ef4444, #dc2626);
                     color: white;
-                    background: var(--danger);
-                    position: relative;
-                    overflow: visible;
+                    border-color: transparent;
+                    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.2);
+                    animation: pulseMic 2s infinite;
                 }
 
-                .icon-only-btn.recording::before {
-                    content: '';
-                    position: absolute;
-                    inset: -4px;
-                    border-radius: 10px;
-                    background: var(--danger);
-                    opacity: 0.3;
-                    animation: ripple 1.5s ease-out infinite;
+                @keyframes pulseMic {
+                    0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+                    50% { transform: scale(1.05); box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }
+                    100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
                 }
+
+                .mic-ripple {
+                    position: absolute;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    width: 100%;
+                    height: 100%;
+                    border-radius: 50%;
+                    pointer-events: none;
+                    z-index: 0;
+                }
+
+                .mic-ripple span {
+                    position: absolute;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    width: 80px;
+                    height: 80px;
+                    border-radius: 50%;
+                    border: 2px solid #ef4444;
+                    opacity: 0;
+                }
+
+                .main-mic-btn.recording ~ .mic-ripple span {
+                    animation: ripple 2s infinite linear;
+                }
+                .main-mic-btn.recording ~ .mic-ripple span:nth-child(1) { animation-delay: 0s; }
+                .main-mic-btn.recording ~ .mic-ripple span:nth-child(2) { animation-delay: 0.6s; }
+                .main-mic-btn.recording ~ .mic-ripple span:nth-child(3) { animation-delay: 1.2s; }
 
                 @keyframes ripple {
-                    0% { transform: scale(1); opacity: 0.3; }
-                    100% { transform: scale(1.5); opacity: 0; }
+                    0% { width: 80px; height: 80px; opacity: 0.8; border-width: 2px; }
+                    100% { width: 240px; height: 240px; opacity: 0; border-width: 0px; }
                 }
 
-                @keyframes pulse {
-                    0%, 100% { opacity: 1; }
-                    50% { opacity: 0.5; }
+                /* Transcription Display */
+                .transcription-display {
+                    width: 100%;
+                    position: relative;
                 }
+
+                .input-area {
+                    width: 100%;
+                    min-height: 40px;
+                    max-height: 120px;
+                    background: transparent;
+                    border: none;
+                    color: var(--text-primary);
+                    font-size: 16px;
+                    line-height: 1.6;
+                    resize: none;
+                    font-family: inherit;
+                    text-align: center;
+                    font-weight: 300;
+                }
+                .input-area::placeholder { color: #555; font-style: italic; }
+                
+                /* Hide scrollbars but allow scroll */
+                .input-area::-webkit-scrollbar { display: none; }
+
+                /* Actions Row Hidden but kept for any legacy references if needed */
+                .actions-row { display: none; }
             `;
 
             const styleSheet = document.createElement('style');
@@ -752,50 +791,38 @@
             const template = `
                 <!-- Panel -->
                 <div class="panel" id="panel">
-                    <!-- Live Transcription Banner -->
-                    <div class="transcription-banner" id="transcriptionBanner">
-                        <div class="transcription-icon">
-                            ${ICONS.MIC}
-                        </div>
-                        <div class="transcription-content">
-                            <div class="transcription-label">Listening...</div>
-                            <div class="transcription-text" id="transcriptionText">Speak now...</div>
-                        </div>
-                        <div class="waveform">
-                            <div class="waveform-bar"></div>
-                            <div class="waveform-bar"></div>
-                            <div class="waveform-bar"></div>
-                            <div class="waveform-bar"></div>
-                            <div class="waveform-bar"></div>
-                        </div>
-                    </div>
-
                     <div class="chat-container">
                         <div class="chat-history" id="chatHistory">
                             <div class="chat-bubble ai">
                                 <div class="avatar ai">
                                     <img src="${LOGO_URL}" alt="AI" />
                                 </div>
-                                <div class="msg-content">Hello! I'm ready to help you fill this form. Just speak or type your information.</div>
+                                <div class="msg-content">Hello! I'm ready to help you fill this form. Just speak about your information.</div>
                             </div>
                         </div>
                         <button class="scroll-bottom-btn" id="scrollBtn">${ICONS.ARROW_DOWN}</button>
                     </div>
 
                     <div class="prompt-box" id="promptBox">
-                        <div class="input-wrapper">
-                            <textarea class="input-area" id="inputArea" placeholder="Type your message..." rows="1"></textarea>
-                        </div>
-                        <div class="actions-row">
-                            <div class="left-actions">
-                                <button class="icon-only-btn" id="attachBtn" title="Attach file">${ICONS.PAPERCLIP}</button>
-                                <button class="icon-only-btn" id="micBtn" title="Voice input">${ICONS.MIC}</button>
-                            </div>
-                            <button class="send-btn" id="sendBtn">
-                                Send Message
-                                ${ICONS.CORNER_DOWN_LEFT}
+                        <!-- Central Mic & Animation -->
+                        <div class="mic-container">
+                            <button class="main-mic-btn" id="micBtn" title="Tap to Speak">
+                                ${ICONS.MIC}
                             </button>
+                            <div class="mic-ripple">
+                                <span></span>
+                                <span></span>
+                                <span></span>
+                            </div>
                         </div>
+
+                        <!-- Transcription Area (ReadOnly) -->
+                        <div class="transcription-display">
+                            <textarea class="input-area" id="inputArea" readonly placeholder="Tap the mic to start..."></textarea>
+                        </div>
+                        
+                        <!-- Hidden Send Btn to maintain ref -->
+                        <button id="sendBtn" style="display:none"></button>
                     </div>
                 </div>
 
@@ -817,8 +844,6 @@
             this.chatHistory = shadow.getElementById('chatHistory');
             this.promptBox = shadow.getElementById('promptBox');
             this.scrollBtn = shadow.getElementById('scrollBtn');
-            this.transcriptionBanner = shadow.getElementById('transcriptionBanner');
-            this.transcriptionText = shadow.getElementById('transcriptionText');
 
             // Events
             this.triggerBtn.onclick = () => this.togglePanel();
@@ -956,7 +981,7 @@
             this.recognition.onresult = (event) => {
                 let interimTranscript = '';
                 let finalTranscript = '';
-                
+
                 for (let i = event.resultIndex; i < event.results.length; i++) {
                     const transcript = event.results[i][0].transcript;
                     if (event.results[i].isFinal) {
@@ -990,25 +1015,23 @@
                 this.micBtn.classList.add('recording');
                 this.micBtn.innerHTML = ICONS.STOP;
                 this.inputArea.placeholder = "Listening...";
+                this.inputArea.value = "Listening...";
                 this.promptBox.classList.add('recording');
-                this.transcriptionBanner.classList.add('active');
             } else {
                 this.micBtn.classList.remove('recording');
                 this.micBtn.innerHTML = ICONS.MIC;
-                this.inputArea.placeholder = "Type your message...";
+                this.inputArea.placeholder = "Tap the mic to start...";
+                this.inputArea.value = "";
                 this.promptBox.classList.remove('recording');
-                this.transcriptionBanner.classList.remove('active');
             }
         }
 
         updateTranscription(text, isFinal) {
-            if (this.transcriptionText) {
-                this.transcriptionText.textContent = text || 'Speak now...';
-                if (isFinal) {
-                    this.transcriptionText.classList.remove('interim');
-                } else {
-                    this.transcriptionText.classList.add('interim');
-                }
+            if (this.inputArea) {
+                this.inputArea.value = text || (this.isListening ? 'Listening...' : '');
+
+                // Auto-scroll textarea if needed
+                this.inputArea.scrollTop = this.inputArea.scrollHeight;
             }
         }
 
@@ -1148,6 +1171,9 @@
                         return this.fillTextInput(element, value);
 
                     case 'select':
+                        if (element.getAttribute('role') === 'combobox') {
+                            return this.fillCombobox(element, value);
+                        }
                         return this.fillSelect(element, value);
 
                     case 'radio':
@@ -1155,6 +1181,9 @@
                         return this.fillCheckbox(element, value);
 
                     default:
+                        if (element.getAttribute('role') === 'combobox') {
+                            return this.fillCombobox(element, value);
+                        }
                         return this.fillTextInput(element, value);
                 }
             } catch (error) {
@@ -1190,6 +1219,43 @@
             if (option) {
                 element.value = option.value;
                 element.dispatchEvent(new Event('change', { bubbles: true }));
+                this.highlightField(element);
+                return true;
+            }
+
+            return false;
+        }
+
+        async fillCombobox(element, value) {
+            // Click to open
+            element.click();
+            await new Promise(r => setTimeout(r, 300));
+
+            // Try to find listbox
+            const listboxId = element.getAttribute('aria-controls');
+            let options = [];
+
+            if (listboxId) {
+                const listbox = document.getElementById(listboxId);
+                if (listbox) options = Array.from(listbox.querySelectorAll('[role="option"]'));
+            } else {
+                // Fallback: look for nearby visible options
+                options = Array.from(document.querySelectorAll('[role="option"]')).filter(opt => {
+                    const rect = opt.getBoundingClientRect();
+                    return rect.width > 0 && rect.height > 0;
+                });
+            }
+
+            // Find matching option
+            const option = options.find(opt => {
+                const text = opt.textContent.trim().toLowerCase();
+                const val = (opt.getAttribute('data-value') || '').toLowerCase();
+                const target = value.toLowerCase();
+                return text.includes(target) || val === target;
+            });
+
+            if (option) {
+                option.click();
                 this.highlightField(element);
                 return true;
             }

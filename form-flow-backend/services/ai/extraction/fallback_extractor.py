@@ -287,11 +287,35 @@ class IntelligentFallbackExtractor:
             return False, 0.0
         
         elif field_type == 'name':
+            # Common greetings and non-name words to filter out
+            EXCLUDED_WORDS = {
+                # Greetings
+                'hello', 'hi', 'hey', 'howdy', 'greetings', 'good', 'morning', 
+                'afternoon', 'evening', 'night', 'welcome',
+                # Common conversational words
+                'thanks', 'thank', 'please', 'sorry', 'yes', 'no', 'okay', 'ok',
+                'sure', 'bye', 'goodbye', 'well', 'great', 'nice', 'cool',
+                # Question words  
+                'what', 'how', 'who', 'when', 'where', 'why', 'which',
+                # Articles/pronouns
+                'the', 'this', 'that', 'you', 'your', 'they', 'their',
+            }
+            
             words = value.split()
-            if 2 <= len(words) <= 4 and all(w.isalpha() for w in words):
+            
+            # Check if value is just a common word (not a name)
+            if len(words) == 1 and words[0].lower() in EXCLUDED_WORDS:
+                return False, 0.0
+            
+            # Filter out excluded words from multi-word names
+            filtered_words = [w for w in words if w.lower() not in EXCLUDED_WORDS]
+            if not filtered_words:
+                return False, 0.0
+            
+            if 2 <= len(filtered_words) <= 4 and all(w.isalpha() for w in filtered_words):
                 return True, 0.88
-            elif len(words) >= 1 and all(w.isalpha() for w in words):
-                 # Allow single names but with lower confidence
+            elif len(filtered_words) >= 1 and all(w.isalpha() for w in filtered_words):
+                # Allow single names but with lower confidence
                 return True, 0.60
             return False, 0.0
         

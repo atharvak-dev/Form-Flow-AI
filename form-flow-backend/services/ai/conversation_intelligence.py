@@ -291,6 +291,15 @@ class IntentRecognizer:
         user_lower = user_input.lower()
         words = user_input.split()
         
+        # --- CHECK CORRECTION FIRST (before data signals) ---
+        # Corrections often contain data (emails, names) but the intent is still correction
+        for pattern in self._compiled_patterns.get(UserIntent.CORRECTION, []):
+            if pattern.search(user_lower):
+                # Higher confidence for start-of-string matches
+                if pattern.pattern.startswith('^'):
+                    return UserIntent.CORRECTION, 0.95
+                return UserIntent.CORRECTION, 0.90
+        
         # --- PRIORITY GATING ---
         # Long input with strong data signals → bias toward DATA
         if len(words) > 5 and self._contains_strong_data_signals(user_input):
@@ -301,6 +310,8 @@ class IntentRecognizer:
         if len(words) <= 5 and self._contains_strong_data_signals(user_input):
             # Check if any intent pattern matches at start
             for intent, patterns in self._compiled_patterns.items():
+                if intent == UserIntent.CORRECTION:
+                    continue  # Already checked above
                 for pattern in patterns:
                     if pattern.pattern.startswith('^') and pattern.search(user_lower):
                         # Intent at start, but also has data → return both signals
@@ -309,6 +320,8 @@ class IntentRecognizer:
         
         # --- STANDARD INTENT DETECTION ---
         for intent, patterns in self._compiled_patterns.items():
+            if intent == UserIntent.CORRECTION:
+                continue  # Already checked above
             for pattern in patterns:
                 if pattern.search(user_lower):
                     # Higher confidence for start-of-string matches
