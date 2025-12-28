@@ -24,6 +24,7 @@ class AgentResponse:
     is_complete: bool
     next_questions: List[Dict[str, Any]]
     fallback_options: List[Dict[str, Any]] = field(default_factory=list)
+    suggestions: List[Dict[str, Any]] = field(default_factory=list)  # Contextual suggestions
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -36,4 +37,5 @@ class AgentResponse:
             'is_complete': self.is_complete,
             'next_questions': self.next_questions,
             'fallback_options': self.fallback_options,
+            'suggestions': self.suggestions,
         }

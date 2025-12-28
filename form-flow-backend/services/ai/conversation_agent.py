@@ -21,7 +21,12 @@ from utils.validators import InputValidationError
 from config.settings import settings
 
 # Models - import from modular files
-from services.ai.models import ConversationSession, AgentResponse
+from services.ai.models import (
+    ConversationSession, 
+    AgentResponse,
+    FieldStatus,
+    UserIntent as StateUserIntent,  # Avoid conflict with conversation_intelligence.UserIntent
+)
 
 # Extraction - import from modular files
 from services.ai.extraction import (
@@ -69,6 +74,9 @@ from services.ai.normalizers import (
     normalize_name_smart,
     normalize_text_smart,
 )
+
+# Suggestion engine for contextual suggestions
+from services.ai.suggestion_engine import SuggestionEngine, PatternType
 
 logger = get_logger(__name__)
 
@@ -159,6 +167,7 @@ class ConversationAgent:
         self.clusterer = FieldClusterer()
         self.value_refiner = ValueRefiner()
         self.intent_recognizer = IntentRecognizer()
+        self.suggestion_engine = SuggestionEngine()
         
         # Session cache
         self._sessions: Dict[str, ConversationSession] = {}
@@ -389,20 +398,51 @@ class ConversationAgent:
             session, user_input, current_batch, remaining_fields, is_voice
         )
         
-        # 7. Refine and store extracted values
+        # 7. Refine and store extracted values using atomic FormDataManager
         refined = self.value_refiner.refine_values(extracted, remaining_fields)
         
         for field_name, value in refined.items():
-            # Add to undo stack
+            # Get field info for pattern detection
+            field_info = next(
+                (f for f in remaining_fields if f.get('name') == field_name),
+                {}
+            )
+            
+            # Add to undo stack (legacy support)
             session.undo_stack.append({
                 'field_name': field_name,
                 'value': value,
                 'timestamp': datetime.now().isoformat()
             })
-            session.extracted_fields[field_name] = value
-            session.confidence_scores[field_name] = confidence_scores.get(field_name, 0.8)
+            
+            # Use FormDataManager for atomic field update with metadata
+            confidence = confidence_scores.get(field_name, 0.8)
+            session.form_data.update_field(
+                field_name=field_name,
+                value=value,
+                confidence=confidence,
+                intent=StateUserIntent.DIRECT_ANSWER,
+                turn_number=session.context_window.current_turn
+            )
+            
+            # Detect patterns from this field for suggestion engine
+            patterns = self.suggestion_engine.detect_patterns(
+                field_name=field_name,
+                field_value=value,
+                field_type=field_info.get('type', 'text'),
+                field_label=field_info.get('label', field_name)
+            )
+            
+            # Store detected patterns in inference cache
+            for pattern_type, pattern_data in patterns.items():
+                session.inference_cache.detected_patterns[str(pattern_type)] = pattern_data
+            
+            logger.debug(f"Detected {len(patterns)} patterns from {field_name}")
         
         logger.info(f"Extracted values: {refined}")
+        
+        # Update context window for field navigation
+        session.context_window.current_turn += 1
         
         # 8. Save session
         await self._save_session(session)
@@ -412,12 +452,50 @@ class ConversationAgent:
         batches = self.clusterer.create_batches(remaining_fields)
         next_batch = batches[0] if batches else []
         
+        # Update context window with current/next field tracking
+        if next_batch:
+            session.context_window.active_field = next_batch[0].get('name')
+            session.context_window.next_field = next_batch[1].get('name') if len(next_batch) > 1 else None
+        
+        # Generate suggestions for upcoming fields
+        suggestions = []
+        if next_batch and session.inference_cache.detected_patterns:
+            suggestions = self.suggestion_engine.generate_suggestions(
+                target_fields=next_batch,
+                extracted_fields=session.extracted_fields,
+                detected_patterns=session.inference_cache.detected_patterns
+            )
+            
+            # Store suggestions in inference cache
+            for suggestion in suggestions:
+                session.inference_cache.contextual_suggestions[suggestion.target_field] = {
+                    'value': suggestion.suggested_value,
+                    'confidence': suggestion.confidence,
+                    'reasoning': suggestion.reasoning
+                }
+            
+            # Optionally enhance message with suggestion
+            if suggestions and suggestions[0].confidence >= 0.75:
+                top_suggestion = suggestions[0]
+                logger.info(f"Generated suggestion: {top_suggestion.target_field} = {top_suggestion.suggested_value}")
+        
         # Adapt message to user style
         if session.conversation_context.user_preference_style:
             message = ResponseAdapter.adapt_response(
                 message, 
                 session.conversation_context.user_preference_style
             )
+        
+        # Build suggestions list for response
+        suggestions_data = [
+            {
+                'field': s.target_field,
+                'value': s.suggested_value,
+                'confidence': s.confidence,
+                'prompt': s.prompt_template
+            }
+            for s in suggestions
+        ]
         
         return AgentResponse(
             message=message,
@@ -429,7 +507,8 @@ class ConversationAgent:
             next_questions=[
                 {'name': f.get('name'), 'label': f.get('label'), 'type': f.get('type')} 
                 for f in next_batch
-            ]
+            ],
+            suggestions=suggestions_data  # New field for contextual suggestions
         )
     
     # =========================================================================
