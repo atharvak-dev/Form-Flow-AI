@@ -28,12 +28,13 @@ class ErrorBoundary extends React.Component {
     }
 
     componentDidCatch(error, errorInfo) {
-        // Log error to console (could send to error tracking service)
         console.error('ErrorBoundary caught an error:', error, errorInfo);
         this.setState({ errorInfo });
 
-        // TODO: Send to error tracking service like Sentry
-        // Sentry.captureException(error, { extra: errorInfo });
+        // Log to error tracking service in production
+        if (import.meta.env.PROD && window.errorTracker) {
+            window.errorTracker.captureException(error, { extra: errorInfo });
+        }
     }
 
     handleRetry = () => {

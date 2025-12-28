@@ -11,7 +11,7 @@
 (function () {
     'use strict';
 
-    console.log('FormFlow: Content script loaded (Version: Modern UI fix 2.0)');
+    console.log('FormFlow: Content script loaded (v3.2.0)');
 
     // Prevent multiple injections
     if (window.__formFlowInjected) return;
@@ -22,7 +22,7 @@
     // =============================================================================
 
     const CONFIG = {
-        MIN_FORM_FIELDS: 0, // Debugging: changed from 2 to 0
+        MIN_FORM_FIELDS: 2,
         BUTTON_OFFSET: 10,
         OVERLAY_Z_INDEX: 2147483647
     };
@@ -1240,6 +1240,6 @@
         });
     }
 
-    console.log('FormFlow: Content script loaded (Version: Single UI 3.1)');
+    console.log('FormFlow: Initialized successfully');
 
 })();

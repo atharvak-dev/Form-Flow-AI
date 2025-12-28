@@ -11,7 +11,8 @@ const CONFIG = {
     WS_URL: 'ws://localhost:8000/ws',
     RECONNECT_DELAY: 1000,
     MAX_RECONNECT_DELAY: 30000,
-    MAX_RECONNECT_ATTEMPTS: 10
+    MAX_RECONNECT_ATTEMPTS: 5,
+    HEALTH_CHECK_TIMEOUT: 5000
 };
 
 // State
@@ -212,9 +213,8 @@ function getExtractedData(tabId) {
 
 async function checkBackendHealth() {
     try {
-        // Use AbortController for timeout (fetch doesn't support timeout option)
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const timeoutId = setTimeout(() => controller.abort(), CONFIG.HEALTH_CHECK_TIMEOUT);
 
         const response = await fetch(`${CONFIG.BACKEND_URL}/health`, {
             method: 'GET',
@@ -225,18 +225,15 @@ async function checkBackendHealth() {
 
         if (response.ok) {
             const data = await response.json();
-            // Accept both 'healthy' and 'degraded' as connected
-            const isConnected = data.status === 'healthy' || data.status === 'degraded';
-            console.log('Health check passed:', data);
+            const isHealthy = ['healthy', 'degraded'].includes(data.status);
+            console.log('Backend health check:', data.status);
             return {
                 success: true,
-                healthy: isConnected,
+                healthy: isHealthy,
                 status: data.status,
                 version: data.version
             };
         }
-
-        console.log('Health check failed with status:', response.status);
         return { success: false, healthy: false };
 
     } catch (error) {
