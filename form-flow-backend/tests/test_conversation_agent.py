@@ -304,7 +304,8 @@ class TestContextBuilder:
         )
         
         assert "USER INPUT" in context
-        assert "FIELDS TO EXTRACT" in context or "CURRENT FIELDS" in context
+        # Updated to match new context format: "CURRENT FIELD(S) TO EXTRACT"
+        assert "TO EXTRACT" in context
         assert "My name is John" in context
     
     def test_includes_already_extracted(self, identity_fields):

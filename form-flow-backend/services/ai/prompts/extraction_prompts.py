@@ -14,74 +14,94 @@ from typing import Dict, List, Any, Optional
 # System Prompt - Version 2.0
 # =============================================================================
 
-EXTRACTION_SYSTEM_PROMPT = """You are FormFlow, an intelligent form-filling assistant.
+EXTRACTION_SYSTEM_PROMPT = """You are FormFlow, an intelligent form-filling assistant with persistent memory.
 
-=== CORE MEMORY PRINCIPLES ===
+=== CONTEXT RETRIEVAL PROTOCOL (5-Step Process) ===
 
-1. PERFECT MEMORY MANAGEMENT:
-   - NEVER forget previously provided information
-   - Maintain complete state of ALL fields: filled, empty, or skipped
-   - Each user input updates the relevant field(s) WITHOUT affecting others
-   - When user says "skip", ONLY skip the CURRENT field being asked
+Before processing ANY user input, ALWAYS execute these steps IN ORDER:
 
-2. STATE AWARENESS:
-   You track:
-   - filled_fields: Previously captured values (PROTECT THESE)
-   - current_field: The field you just asked about (target for skip)
-   - remaining_fields: Fields not yet asked
+STEP 1: LOAD STATE
+- Identify filled_fields (values already captured - NEVER overwrite without explicit correction)
+- Identify current_field (what you just asked about - target for "skip")
+- Identify pending_fields (fields not yet asked)
+- Note field_confidence scores for each filled field
 
-3. CRITICAL SKIP RULES:
-   ❌ NEVER say "skipping Name, Email, Phone" when user only wants to skip current field
-   ✅ When user says "skip it": Skip ONLY current_field, NOT filled_fields
-   ✅ Filled fields are LOCKED unless user explicitly corrects them
+STEP 2: ANALYZE HISTORY
+- Review last 3 conversation turns for context
+- Identify any patterns (corrections, confusion, field order)
+- Track user's communication style (formal, casual, brief)
+
+STEP 3: UNDERSTAND USER INPUT
+- Classify intent FIRST: DATA, SKIP, CORRECTION, HELP, CONFIRMATION
+- Parse input considering voice input patterns if applicable
+- Map values to appropriate fields based on type matching
+
+STEP 4: CONTEXT-AWARE REASONING
+Apply these rules based on detected intent:
+- DATA: Extract and map values to fields, respecting boundaries
+- SKIP: Mark ONLY current_field as skipped, PROTECT all filled_fields
+- CORRECTION: Update specified field ONLY, preserve all others
+- HELP: Provide field-specific guidance
+- CONFIRMATION: Acknowledge and proceed
+
+STEP 5: UPDATE STATE & RESPOND
+- Apply changes atomically (all or nothing)
+- Generate response that acknowledges action taken
+- Ask for next required field or confirm completion
+
+=== CRITICAL STATE PROTECTION RULES ===
+
+⚠️ IMMUTABLE PRINCIPLE: Filled fields are LOCKED until explicit correction.
+
+SKIP HANDLING (MOST COMMON ERROR SOURCE):
+❌ WRONG: User says "skip" → Skip all pending fields
+❌ WRONG: User says "skip it" → Clear filled fields
+✅ CORRECT: User says "skip" → Skip ONLY the field just asked about
+
+CORRECTION HANDLING:
+✅ "Actually my email is X" → Update email ONLY, keep all other fields
+✅ "No, my name is Y" → Update name ONLY, keep all other fields
+✅ "Wrong phone" → Update phone when user provides new value
 
 === EXTRACTION PRINCIPLES ===
 
 1. BOUNDARY DETECTION:
    - Each field value has CLEAR START and END boundaries
-   - STOP at transition markers: "and", "my", "also"
+   - STOP at transition markers: "and", "my", "also", field labels
    - Extract MINIMAL viable value - don't be greedy
 
-2. FIELD-AWARE EXTRACTION:
-   When extracting for a field:
-   - Know what you're looking for (name = 2-3 words, email = has @, etc.)
-   - Stop when you've captured enough for THAT field type
-   - Don't continue into next field's territory
-
-3. MULTI-FIELD INPUT HANDLING:
+2. MULTI-FIELD INPUT:
    Input: "My name is John Doe and my email is john@example.com"
    
-   Extract: {"name": "John Doe", "email": "john@example.com"}
-   NOT: {"name": "John Doe and my email is john@example.com"}
+   CORRECT: {"name": "John Doe", "email": "john@example.com"}
+   WRONG:   {"name": "John Doe and my email is john@example.com"}
 
-4. TYPE-SPECIFIC RULES:
+3. TYPE-SPECIFIC RULES:
    - Names: 2-4 words, alphabetic, title case
-   - Emails: Contains @, lowercase
-   - Phones: Digits only, 10-15 chars
-   - Dates: Recognize formats (DD/MM/YYYY, etc.)
+   - Emails: Contains @, validate domain, lowercase
+   - Phones: Digits only, 10-15 chars, may have country code
+   - Dates: Multiple formats accepted (DD/MM/YYYY, MM-DD-YY, etc.)
 
-=== INTENT RECOGNITION ===
+4. CONFIDENCE SCORING:
+   - 0.95+: Exact match, high clarity
+   - 0.80-0.94: Good match, minor variations
+   - 0.60-0.79: Possible match, needs confirmation
+   - <0.60: Low confidence, ask for clarification
 
-Detect user intent BEFORE extraction:
-- "skip it" / "leave blank" / "don't have" → SKIP current field ONLY
-- "actually my X is Y" / "change X to Y" → CORRECTION of X
-- "my [field] is [value]" → DATA for that field
-- "what field?" / "help" → HELP request
+=== INTENT CLASSIFICATION ===
 
-=== RESPONSE FORMAT ===
+Detect intent BEFORE extraction:
 
-Provide friendly, context-aware responses:
-
-After extraction:
-"Got your [field]: [value]! ✅ What's your [next_field]?"
-
-After skip:
-"No problem, I'll mark [current_field] as skipped. What's your [next_field]?"
-
-After correction:
-"Updated! Your [field] is now [new_value]. Continuing - what's your [next_field]?"
+| Pattern | Intent | Action |
+|---------|--------|--------|
+| "skip", "pass", "next", "don't have" | SKIP | Skip current_field ONLY |
+| "actually", "no,", "wrong", "change" | CORRECTION | Update specified field |
+| "my [field] is [value]" | DATA | Extract to field |
+| "help", "what", "example" | HELP | Provide guidance |
+| "yes", "correct", "right" | CONFIRMATION | Confirm and proceed |
 
 === OUTPUT FORMAT (strict JSON) ===
+
 {
     "message": "Friendly acknowledgment + next question",
     "extracted": {
@@ -90,12 +110,22 @@ After correction:
     "confidence": {
         "field_name": 0.95
     },
+    "skipped_fields": ["field_name_if_skipped"],
     "needs_confirmation": ["field_name_if_confidence_low"],
-    "reasoning": "Brief explanation of extraction decisions"
+    "reasoning": "Brief explanation of decisions made",
+    "intent_detected": "DATA|SKIP|CORRECTION|HELP|CONFIRMATION"
 }
 
-Remember: PRECISION over capture. When in doubt, extract less, ask more.
-Do NOT mix up current field with previously filled fields!"""
+=== VOICE INPUT CONSIDERATIONS ===
+
+When processing voice input:
+- "at" may mean "@" in emails
+- Numbers may be spelled out ("five five five" = "555")
+- Common homophones: "John" vs "Jon", "there" vs "their"
+- STT confidence affects extraction confidence
+
+Remember: PRECISION over capture. Protect filled fields. When in doubt, ask.
+"""
 
 
 # =============================================================================
@@ -163,16 +193,21 @@ def build_extraction_context(
     user_input: str,
     conversation_history: List[Dict[str, str]],
     already_extracted: Dict[str, str],
-    is_voice: bool = False
+    is_voice: bool = False,
+    skipped_fields: Optional[List[str]] = None,
+    confidence_scores: Optional[Dict[str, float]] = None,
+    current_turn: int = 0,
+    suggestions: Optional[List[Dict[str, Any]]] = None
 ) -> str:
     """
-    Build comprehensive context for LLM extraction.
+    Build comprehensive context for LLM extraction with enhanced state awareness.
     
-    Creates a structured prompt that helps the LLM understand:
-    1. What fields we're currently asking about
-    2. What values to look for
-    3. Where to stop extraction
-    4. User context (voice mode, etc.)
+    Creates a structured prompt following the 5-step context retrieval protocol:
+    1. Current field(s) being asked - target for "skip"
+    2. Field-level metadata (status, confidence, turn)
+    3. Protected filled fields
+    4. Skipped fields
+    5. Contextual suggestions when available
     
     Args:
         current_batch: Fields being asked about in this turn
@@ -181,58 +216,118 @@ def build_extraction_context(
         conversation_history: Recent conversation turns
         already_extracted: Previously extracted values
         is_voice: Whether input is from voice
+        skipped_fields: Fields user has chosen to skip
+        confidence_scores: Confidence for each extracted field
+        current_turn: Current conversation turn number
+        suggestions: Contextual suggestions from SuggestionEngine
         
     Returns:
         Formatted context string for LLM
     """
     context_parts = []
+    skipped_fields = skipped_fields or []
+    confidence_scores = confidence_scores or {}
+    suggestions = suggestions or []
     
-    # 1. Current batch with extraction hints
-    context_parts.append("=== CURRENT FIELDS TO EXTRACT ===")
-    for field in current_batch:
+    # =========================================================================
+    # STEP 1: CURRENT FIELD STATE (What LLM should focus on)
+    # =========================================================================
+    context_parts.append("=== CURRENT FIELD(S) TO EXTRACT ===")
+    context_parts.append("⚠️ If user says 'skip', skip ONLY these fields:")
+    
+    for idx, field in enumerate(current_batch):
         name = field.get('name', '')
         label = field.get('label', name)
         ftype = field.get('type', 'text')
         expected_format = get_expected_format(field)
         
-        context_parts.append(f"• {name} ({label})")
-        context_parts.append(f"  Type: {ftype}")
-        context_parts.append(f"  Expected: {expected_format}")
+        # Mark first field as primary (most likely skip target)
+        if idx == 0:
+            context_parts.append(f"► {name} ({label}) ← PRIMARY FIELD (skip target)")
+        else:
+            context_parts.append(f"  {name} ({label})")
         
+        context_parts.append(f"    Type: {ftype} | Expected: {expected_format}")
+        
+        # Show options if available
         if field.get('options'):
             options = [o.get('label', o.get('value')) for o in field['options'][:5]]
-            context_parts.append(f"  Options: {', '.join(options)}")
+            context_parts.append(f"    Options: {', '.join(options)}")
+        
+        # Show suggestion if available for this field
+        field_suggestion = next((s for s in suggestions if s.get('field') == name), None)
+        if field_suggestion:
+            context_parts.append(f"    💡 Suggestion: {field_suggestion.get('value')} (conf: {field_suggestion.get('confidence', 0):.0%})")
     
-    # 2. User input
+    # =========================================================================
+    # STEP 2: USER INPUT
+    # =========================================================================
     context_parts.append("\n=== USER INPUT ===")
     context_parts.append(f'"{user_input}"')
+    context_parts.append(f"Turn: {current_turn} | Voice: {'Yes' if is_voice else 'No'}")
     
-    # 3. Already extracted (CRITICAL: LLM must know these are PROTECTED)
+    # =========================================================================
+    # STEP 3: FILLED FIELDS (PROTECTED - Critical for skip handling)
+    # =========================================================================
     if already_extracted:
-        context_parts.append("\n=== FILLED FIELDS (PROTECTED - DO NOT SKIP) ===")
-        for field, value in already_extracted.items():
-            context_parts.append(f"✅ {field}: {value}")
-        context_parts.append("☝️ These are FILLED. If user says 'skip', skip CURRENT fields only.")
+        context_parts.append("\n=== FILLED FIELDS (🔒 PROTECTED - DO NOT MODIFY) ===")
+        for field_name, value in already_extracted.items():
+            conf = confidence_scores.get(field_name, 0.8)
+            conf_indicator = "🟢" if conf >= 0.9 else "🟡" if conf >= 0.7 else "🔴"
+            context_parts.append(f"{conf_indicator} {field_name}: {value} ({conf:.0%})")
+        
+        context_parts.append("")
+        context_parts.append("⚠️ CRITICAL: These fields are LOCKED.")
+        context_parts.append("   If user says 'skip', DO NOT clear these!")
+        context_parts.append("   Only CURRENT FIELD(S) above can be skipped.")
     
-    # 4. STOP indicators (other field names to NOT capture)
+    # =========================================================================
+    # STEP 4: SKIPPED FIELDS
+    # =========================================================================
+    if skipped_fields:
+        context_parts.append("\n=== SKIPPED FIELDS ===")
+        for field_name in skipped_fields:
+            context_parts.append(f"⏭️ {field_name} (user chose to skip)")
+    
+    # =========================================================================
+    # STEP 5: EXTRACTION BOUNDARIES
+    # =========================================================================
     other_fields = [f.get('name') for f in remaining_fields if f not in current_batch]
     if other_fields:
         context_parts.append("\n=== STOP EXTRACTION BEFORE ===")
-        context_parts.append(f"Do NOT include these field values: {', '.join(other_fields[:8])}")
+        context_parts.append(f"Do NOT capture values for: {', '.join(other_fields[:8])}")
     
-    # 5. Voice mode indicator
+    # =========================================================================
+    # STEP 6: VOICE MODE CONSIDERATIONS
+    # =========================================================================
     if is_voice:
         context_parts.append("\n=== VOICE INPUT MODE ===")
-        context_parts.append("User is speaking. Common STT errors may be present.")
+        context_parts.append("⚡ User is speaking. Watch for:")
+        context_parts.append("   - 'at' → '@' in emails")
+        context_parts.append("   - Spelled numbers ('five' → '5')")
+        context_parts.append("   - Homophones (John/Jon, there/their)")
     
-    # 6. Recent conversation (limit to 3 turns)
+    # =========================================================================
+    # STEP 7: RECENT CONVERSATION CONTEXT
+    # =========================================================================
     if conversation_history:
         recent = conversation_history[-3:]
         if recent:
             context_parts.append("\n=== RECENT CONVERSATION ===")
             for turn in recent:
-                role = turn.get('role', 'user')
+                role = turn.get('role', 'user').upper()
                 content = turn.get('content', '')[:100]
-                context_parts.append(f"{role}: {content}")
+                intent = turn.get('intent', '')
+                intent_str = f" [{intent}]" if intent else ""
+                context_parts.append(f"{role}{intent_str}: {content}")
+    
+    # =========================================================================
+    # FINAL REMINDER
+    # =========================================================================
+    context_parts.append("\n=== REMEMBER ===")
+    context_parts.append("• 'skip' = skip CURRENT field only, NOT filled fields")
+    context_parts.append("• 'actually'/'no' = CORRECTION, update only specified field")
+    context_parts.append("• Extract values with clear boundaries, don't be greedy")
     
     return "\n".join(context_parts)
+
