@@ -573,9 +573,29 @@ class ConversationAgent:
                 if extracted:
                     logger.info(f"Local LLM extracted: {list(extracted.keys())}")
                     
-                    # Generate simple message
-                    field_labels = [current_batch[0].get('label', 'information') for _ in extracted]
-                    message = f"Got your {field_labels[0]}!" if len(field_labels) == 1 else "Got that information!"
+                    # Generate confirmation message with extracted field labels
+                    extracted_labels = []
+                    for field_name in extracted.keys():
+                        field_info = next((f for f in current_batch if f.get('name') == field_name), {})
+                        extracted_labels.append(field_info.get('label', field_name))
+                    
+                    if len(extracted_labels) == 1:
+                        message = f"Got your {extracted_labels[0]}!"
+                    else:
+                        message = f"Got your {', '.join(extracted_labels)}!"
+                    
+                    # Add next question if more fields remain
+                    remaining_after = [f for f in remaining_fields if f.get('name') not in extracted]
+                    if remaining_after:
+                        next_batches = self.clusterer.create_batches(remaining_after)
+                        if next_batches:
+                            next_labels = [f.get('label', f.get('name', '')) for f in next_batches[0][:3]]
+                            if len(next_labels) == 1:
+                                message += f" What's your {next_labels[0]}?"
+                            elif len(next_labels) == 2:
+                                message += f" What's your {next_labels[0]} and {next_labels[1]}?"
+                            else:
+                                message += f" What's your {', '.join(next_labels[:-1])}, and {next_labels[-1]}?"
                     
                     return extracted, confidence, message
                     
