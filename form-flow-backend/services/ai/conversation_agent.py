@@ -13,6 +13,7 @@ This is a slim orchestration layer that coordinates:
 
 import uuid
 import asyncio
+import re
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 
@@ -399,7 +400,118 @@ class ConversationAgent:
             await self._save_session(session)
             return result
         
-        # 5. Add to conversation history
+        # 5. Check for compound intent (DATA + SKIP combined)
+        # e.g., "contact reason is job application and rest skip it"
+        has_skip_rest = bool(re.search(
+            r'\b(and\s+)?(rest\s+skip|skip\s+(the\s+)?rest|and\s+skip|rest\s+skip\s+it)\b',
+            user_input.lower()
+        ))
+        
+        if has_skip_rest and current_batch:
+            logger.info("Detected compound intent: DATA + SKIP REST")
+            
+            # First, extract values from the data portion
+            # Remove skip-related phrases before extraction
+            clean_input = re.sub(
+                r'\b(and\s+)?(rest\s+skip(\s+it)?|skip\s+(the\s+)?rest(\s+of\s+them)?|and\s+skip(\s+it)?)\b',
+                '',
+                user_input,
+                flags=re.IGNORECASE
+            ).strip()
+            
+            logger.info(f"Clean input for extraction: '{clean_input}'")
+            
+            # Extract from clean input
+            extracted, confidence_scores, message = await self._extract_values(
+                session, clean_input, current_batch, remaining_fields, is_voice
+            )
+            
+            # Refine and store extracted values
+            refined = self.value_refiner.refine_values(extracted, remaining_fields)
+            
+            for field_name, value in refined.items():
+                # Add to undo stack
+                session.undo_stack.append({
+                    'field_name': field_name,
+                    'value': value,
+                    'timestamp': datetime.now().isoformat()
+                })
+                
+                # Use FormDataManager for atomic field update
+                confidence = confidence_scores.get(field_name, 0.8)
+                session.form_data_manager.update_field(
+                    field_name=field_name,
+                    value=value,
+                    confidence=confidence,
+                    intent=StateUserIntent.DIRECT_ANSWER,
+                    turn=session.context_window.current_turn
+                )
+            
+            # Now skip the remaining fields in current batch that weren't filled
+            filled_names = set(refined.keys())
+            skipped_labels = []
+            for field in current_batch:
+                field_name = field.get('name')
+                if field_name not in filled_names:
+                    already_skipped = session.form_data_manager.get_skipped_field_names()
+                    if field_name and field_name not in already_skipped:
+                        session.form_data_manager.skip_field(
+                            field_name=field_name,
+                            turn=getattr(session.context_window, 'current_turn', 0)
+                        )
+                        if hasattr(session.context_window, 'mark_field_skipped'):
+                            session.context_window.mark_field_skipped(field_name)
+                        skipped_labels.append(field.get('label', field_name))
+            
+            # Save session and generate response
+            await self._save_session(session)
+            
+            # Build response message
+            extracted_labels = []
+            for field_name in refined.keys():
+                field_info = next((f for f in current_batch if f.get('name') == field_name), {})
+                extracted_labels.append(field_info.get('label', field_name))
+            
+            if extracted_labels:
+                message = f"Got your {', '.join(extracted_labels)}!"
+            else:
+                message = ""
+            
+            if skipped_labels:
+                if message:
+                    message += f" Skipped {', '.join(skipped_labels)}."
+                else:
+                    message = f"Skipped {', '.join(skipped_labels)}."
+            
+            # Add next question
+            new_remaining = session.get_remaining_fields()
+            if new_remaining:
+                next_batches = self.clusterer.create_batches(new_remaining)
+                if next_batches:
+                    next_batch = next_batches[0]
+                    next_labels = [f.get('label', f.get('name', '')) for f in next_batch[:3]]
+                    
+                    if len(next_labels) == 1:
+                        message += f" What's your {next_labels[0]}?"
+                    elif len(next_labels) == 2:
+                        message += f" What's your {next_labels[0]} and {next_labels[1]}?"
+                    else:
+                        message += f" What's your {', '.join(next_labels[:-1])}, and {next_labels[-1]}?"
+            
+            return AgentResponse(
+                message=message,
+                extracted_values=refined,
+                confidence_scores=confidence_scores,
+                needs_confirmation=[],
+                remaining_fields=new_remaining,
+                is_complete=len([f for f in new_remaining if f.get('required', False)]) == 0,
+                next_questions=[
+                    {'name': f.get('name'), 'label': f.get('label'), 'type': f.get('type')} 
+                    for f in (next_batches[0] if next_batches else [])
+                ]
+            )
+        
+        # 6. Add to conversation history
         session.conversation_history.append({
             'role': 'user',
             'content': user_input,
@@ -407,7 +519,7 @@ class ConversationAgent:
             'sentiment': session.conversation_context.user_sentiment.value
         })
         
-        # 6. Extract values
+        # 7. Extract values
         logger.info(f"Processing input: '{user_input[:100]}...'")
         logger.info(f"Current batch fields: {[f.get('name') for f in current_batch]}")
         
@@ -415,7 +527,7 @@ class ConversationAgent:
             session, user_input, current_batch, remaining_fields, is_voice
         )
         
-        # 7. Refine and store extracted values using atomic FormDataManager
+        # 8. Refine and store extracted values using atomic FormDataManager
         refined = self.value_refiner.refine_values(extracted, remaining_fields)
         
         for field_name, value in refined.items():

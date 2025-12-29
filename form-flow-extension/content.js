@@ -1292,10 +1292,14 @@
                         this.showNotification(`✓ ${extractedCount} field${extractedCount > 1 ? 's' : ''} collected`);
                     }
 
-                    // Check if form is complete - show sticky Fill Form button
+                    // Always show/update Fill Form button when there are collected values
+                    if (Object.keys(this.allExtractedValues).length > 0) {
+                        this.updateFillFormButton();
+                    }
+
+                    // Check if form is complete
                     if (response.isComplete) {
                         this.isFormComplete = true;
-                        this.showFillFormButton();
                         this.showNotification('🎉 All fields collected! Ready to fill form.');
                     }
 
@@ -1310,13 +1314,21 @@
             }
         }
 
-        showFillFormButton() {
-            // Only create if not already present
-            if (this.fillFormBtn) return;
-
-            // Get the shadow root
-            const shadow = this.container.shadowRoot;
+        updateFillFormButton() {
+            const shadow = this.container?.shadowRoot;
             if (!shadow) return;
+
+            const fieldCount = Object.keys(this.allExtractedValues).length;
+            if (fieldCount === 0) return;
+
+            // If button already exists, just update the count
+            if (this.fillFormBtn) {
+                const span = this.fillFormBtn.querySelector('span');
+                if (span && !span.textContent.includes('Filling') && !span.textContent.includes('Done')) {
+                    span.textContent = `Fill Form (${fieldCount} field${fieldCount > 1 ? 's' : ''})`;
+                }
+                return;
+            }
 
             // Create sticky button container
             const btnContainer = document.createElement('div');
@@ -1326,7 +1338,7 @@
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>
                     </svg>
-                    <span>Fill Form (${Object.keys(this.allExtractedValues).length} fields)</span>
+                    <span>Fill Form (${fieldCount} field${fieldCount > 1 ? 's' : ''})</span>
                 </button>
             `;
 
@@ -1352,6 +1364,11 @@
 
             // Add animation
             setTimeout(() => btnContainer.classList.add('visible'), 50);
+        }
+
+        // Legacy method for backwards compatibility
+        showFillFormButton() {
+            this.updateFillFormButton();
         }
 
         showNotification(message) {
