@@ -724,11 +724,11 @@
                 .prompt-box {
                     background: var(--bg-dark);
                     border-top: 1px solid var(--border-dark);
-                    padding: 24px;
+                    padding: 12px 16px;
                     display: flex;
                     flex-direction: column;
                     align-items: center;
-                    gap: 16px;
+                    gap: 8px;
                     transition: border-color 0.3s ease;
                     position: relative;
                     overflow: visible;
@@ -765,13 +765,13 @@
 
                 .input-area {
                     width: 100%;
-                    min-height: 40px;
-                    max-height: 120px;
+                    min-height: 36px;
+                    max-height: 100px;
                     background: transparent;
                     border: none;
                     color: var(--text-primary);
-                    font-size: 16px;
-                    line-height: 1.6;
+                    font-size: 15px;
+                    line-height: 1.5;
                     resize: none;
                     font-family: inherit;
                     text-align: center;
@@ -785,20 +785,20 @@
                 /* Actions Row Hidden but kept for any legacy references if needed */
                 .actions-row { display: none; }
 
-                /* New Voice Input Styling (Replica of React Component) */
+                /* New Voice Input Styling */
                 .voice-input-container {
                     width: 100%;
-                    padding: 16px 0;
+                    padding: 4px 0;
                     display: flex;
                     flex-direction: column;
                     align-items: center;
-                    gap: 8px;
+                    gap: 6px;
                 }
 
                 .voice-trigger-btn {
                     position: relative;
-                    width: 64px;
-                    height: 64px;
+                    width: 56px;
+                    height: 56px;
                     border-radius: 12px;
                     background: transparent;
                     border: none;
@@ -848,7 +848,7 @@
 
                 .voice-timer {
                     font-family: 'Geist Mono', monospace;
-                    font-size: 14px;
+                    font-size: 12px;
                     color: rgba(255,255,255,0.4);
                     transition: color 0.3s;
                 }
@@ -858,8 +858,8 @@
                 }
 
                 .voice-visualizer {
-                    height: 16px;
-                    width: 256px;
+                    height: 12px;
+                    width: 200px;
                     display: flex;
                     align-items: center;
                     justify-content: center;
@@ -885,8 +885,8 @@
                 }
 
                 .voice-status {
-                    height: 16px;
-                    font-size: 12px;
+                    height: 14px;
+                    font-size: 11px;
                     color: rgba(255,255,255,0.6);
                     margin: 0;
                 }

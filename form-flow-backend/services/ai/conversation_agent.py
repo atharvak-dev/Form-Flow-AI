@@ -674,23 +674,37 @@ class ConversationAgent:
                 extracted = {}
                 confidence = {}
                 
-                for field in current_batch:  # Process ALL fields in batch
-                    field_name = field.get('name')
-                    field_label = field.get('label', field_name)
-                    
-                    # Skip if already extracted
-                    if field_name in extracted:
-                        continue
-                        
-                    result = self.local_llm.extract_field_value(user_input, field_label)
-                    if result.get('value') and result.get('confidence', 0) > 0.3:
-                        extracted[field_name] = result['value']
-                        confidence[field_name] = result['confidence']
+                # Prepare field list for extraction
+                fields_to_extract = [
+                    field.get('label', field.get('name')) 
+                    for field in current_batch 
+                    if field.get('name') not in extracted
+                ]
                 
+                if fields_to_extract:
+                    # Use new batch extraction method
+                    batch_result = self.local_llm.extract_all_fields(user_input, fields_to_extract)
+                    
+                    if batch_result.get('extracted'):
+                        new_extracted = batch_result['extracted']
+                        new_confidence = batch_result.get('confidence', {})
+                        
+                        # Update main extracted dict
+                        for label, value in new_extracted.items():
+                            # Find matching field name from label
+                            field_match = next(
+                                (f for f in current_batch if f.get('label', f.get('name')) == label), 
+                                None
+                            )
+                            if field_match:
+                                field_name = field_match.get('name')
+                                extracted[field_name] = value
+                                confidence[field_name] = new_confidence.get(label, 0.8)
+
                 if extracted:
                     logger.info(f"Local LLM extracted: {list(extracted.keys())}")
                     
-                    # Generate confirmation message with extracted field labels
+                    # Generate confirmation message
                     extracted_labels = []
                     for field_name in extracted.keys():
                         field_info = next((f for f in current_batch if f.get('name') == field_name), {})

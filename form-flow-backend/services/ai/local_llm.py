@@ -257,8 +257,8 @@ class LocalLLMService:
         if 'phone' in field_lower or 'mobile' in field_lower or 'number' in field_lower:
             # Remove spaces and common separators
             digits_only = re.sub(r'[^\d]', '', normalized)
-            if len(digits_only) >= 10:
-                # Take last 10 digits for Indian numbers
+            if len(digits_only) >= 9:
+                # Take last 10 digits if longer (standardizing), or keep as is if 9-10
                 phone = digits_only[-10:] if len(digits_only) > 10 else digits_only
                 return {"value": phone, "confidence": 0.85, "source": "heuristic"}
         
