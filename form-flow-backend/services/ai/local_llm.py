@@ -166,24 +166,40 @@ class LocalLLMService:
         """Extract using local 3B model."""
         self._initialize()
         
-        prompt = f"Extract {field_name} from: {user_input}\nAnswer:"
+        # Preprocess input for common spoken patterns
+        cleaned_input = user_input.replace("at the rate", "@").replace(" at ", "@").replace(" dot ", ".")
+        
+        # Improved prompt for phi-2
+        prompt = f"Instruct: Extract the {field_name} from the user input.\nUser Input: {cleaned_input}\nOutput:"
         inputs = self.tokenizer(prompt, return_tensors="pt")
         
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
-                max_new_tokens=8,
+                max_new_tokens=32,  # Increased from 8 to allow full emails/addresses
                 temperature=0.1,
                 do_sample=False,
                 pad_token_id=self.tokenizer.eos_token_id
             )
         
         response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-        extracted = response[len(prompt):].strip()
+        
+        # Phi-2 chat format parsing
+        try:
+            if "Output:" in response:
+                extracted = response.split("Output:")[-1].strip()
+            else:
+                extracted = response[len(prompt):].strip()
+        except:
+            extracted = response[len(prompt):].strip()
+            
+        # Clean up any trailing text
+        if "\n" in extracted:
+            extracted = extracted.split("\n")[0].strip()
         
         return {
             "value": extracted,
-            "confidence": min(0.9, len(extracted) / 15) if extracted else 0.1,
+            "confidence": min(0.9, len(extracted) / 10) if extracted else 0.1,
             "source": "local_llm"
         }
     
@@ -211,28 +227,97 @@ class LocalLLMService:
         """Simple heuristic extraction as final fallback."""
         import re
         
+        # Normalize input first
+        normalized = self._normalize_input(user_input)
         field_lower = field_name.lower()
         
-        # Email detection
+        # Email detection (robust for spoken patterns)
         if 'email' in field_lower:
-            email_match = re.search(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', user_input)
+            email_match = re.search(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', normalized)
             if email_match:
-                return {"value": email_match.group(), "confidence": 0.9, "source": "heuristic"}
+                return {"value": email_match.group().lower(), "confidence": 0.9, "source": "heuristic"}
         
-        # Name detection
+        # Name detection (handles multi-word names)
         if 'name' in field_lower:
-            # Look for capitalized words
-            name_match = re.search(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', user_input)
-            if name_match:
-                return {"value": name_match.group(), "confidence": 0.7, "source": "heuristic"}
+            # Look for "name is X" or "I'm X" patterns
+            name_patterns = [
+                r'(?:my\s+)?name\s+is\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+                r"(?:i'?m|this is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)",
+                r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)'  # 2+ capitalized words
+            ]
+            for pattern in name_patterns:
+                match = re.search(pattern, user_input, re.IGNORECASE)
+                if match:
+                    name = match.group(1).strip()
+                    # Title case the name
+                    name = ' '.join(word.capitalize() for word in name.split())
+                    return {"value": name, "confidence": 0.85, "source": "heuristic"}
         
-        # Phone detection
-        if 'phone' in field_lower:
-            phone_match = re.search(r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b', user_input)
-            if phone_match:
-                return {"value": phone_match.group(), "confidence": 0.8, "source": "heuristic"}
+        # Phone detection (handles Indian and intl formats)
+        if 'phone' in field_lower or 'mobile' in field_lower or 'number' in field_lower:
+            # Remove spaces and common separators
+            digits_only = re.sub(r'[^\d]', '', normalized)
+            if len(digits_only) >= 10:
+                # Take last 10 digits for Indian numbers
+                phone = digits_only[-10:] if len(digits_only) > 10 else digits_only
+                return {"value": phone, "confidence": 0.85, "source": "heuristic"}
         
         return {"value": "", "confidence": 0.0, "source": "heuristic"}
+    
+    def _normalize_input(self, user_input: str) -> str:
+        """Normalize spoken input patterns to standard formats."""
+        import re
+        
+        normalized = user_input
+        
+        # Email normalization
+        normalized = re.sub(r'\bat\s+the\s+rate\b', '@', normalized, flags=re.IGNORECASE)
+        normalized = re.sub(r'\s+at\s+', '@', normalized)
+        normalized = re.sub(r'\s+dot\s+', '.', normalized, flags=re.IGNORECASE)
+        
+        # Number word to digit (for phone numbers in speech)
+        number_words = {
+            'zero': '0', 'one': '1', 'two': '2', 'three': '3', 'four': '4',
+            'five': '5', 'six': '6', 'seven': '7', 'eight': '8', 'nine': '9',
+            'double': '  '  # placeholder for "double five" -> "55"
+        }
+        
+        for word, digit in number_words.items():
+            normalized = re.sub(rf'\b{word}\b', digit, normalized, flags=re.IGNORECASE)
+        
+        # Handle "double X" pattern (e.g., "double five" -> "55")
+        normalized = re.sub(r'  (\d)', r'\1\1', normalized)
+        
+        return normalized
+    
+    def extract_all_fields(self, user_input: str, fields: List[str]) -> Dict[str, Any]:
+        """
+        Extract ALL fields from a single user input in one pass.
+        
+        This is more efficient than calling extract_field_value multiple times
+        and better handles multi-field responses like:
+        "My name is John, email is john@test.com, phone is 1234567890"
+        
+        Args:
+            user_input: The user's full input text
+            fields: List of field names to extract (e.g., ["Full Name", "Email", "Phone"])
+            
+        Returns:
+            Dict with extracted values, confidences, and source
+        """
+        results = {}
+        normalized = self._normalize_input(user_input)
+        
+        for field in fields:
+            result = self._extract_with_heuristics(normalized, field)
+            if result.get('value') and result.get('confidence', 0) > 0.3:
+                results[field] = result
+        
+        return {
+            "extracted": {k: v["value"] for k, v in results.items()},
+            "confidence": {k: v["confidence"] for k, v in results.items()},
+            "source": "batch_heuristic"
+        }
 
 
 # Singleton instance

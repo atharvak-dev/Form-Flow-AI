@@ -674,10 +674,14 @@ class ConversationAgent:
                 extracted = {}
                 confidence = {}
                 
-                for field in current_batch[:2]:  # Limit to 2 fields for performance
+                for field in current_batch:  # Process ALL fields in batch
                     field_name = field.get('name')
                     field_label = field.get('label', field_name)
                     
+                    # Skip if already extracted
+                    if field_name in extracted:
+                        continue
+                        
                     result = self.local_llm.extract_field_value(user_input, field_label)
                     if result.get('value') and result.get('confidence', 0) > 0.3:
                         extracted[field_name] = result['value']
