@@ -403,14 +403,30 @@ class InferenceCache:
     
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to dictionary for persistence."""
+        # Handle both PatternMatch objects and raw dicts in detected_patterns
+        serialized_patterns = {}
+        for k, v in self.detected_patterns.items():
+            if isinstance(v, dict):
+                serialized_patterns[k] = v
+            elif hasattr(v, 'to_dict'):
+                serialized_patterns[k] = v.to_dict()
+            else:
+                serialized_patterns[k] = v
+        
+        # Handle both ContextualSuggestion objects and raw dicts in suggestions
+        serialized_suggestions = {}
+        for k, v in self.suggestions.items():
+            if isinstance(v, dict):
+                serialized_suggestions[k] = v
+            elif hasattr(v, 'to_dict'):
+                serialized_suggestions[k] = v.to_dict()
+            else:
+                serialized_suggestions[k] = v
+        
         return {
-            'detected_patterns': {
-                k: v.to_dict() for k, v in self.detected_patterns.items()
-            },
+            'detected_patterns': serialized_patterns,
             'user_preferences': self.user_preferences,
-            'suggestions': {
-                k: v.to_dict() for k, v in self.suggestions.items()
-            },
+            'suggestions': serialized_suggestions,
             'suggestion_acceptance_count': self.suggestion_acceptance_count,
             'suggestion_rejection_count': self.suggestion_rejection_count,
             'correction_count': self.correction_count

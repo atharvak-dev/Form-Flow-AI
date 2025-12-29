@@ -152,8 +152,19 @@ class IntentHandler:
         
         for field in current_batch:
             field_name = field.get('name')
-            if field_name and field_name not in session.skipped_fields:
-                session.skipped_fields.append(field_name)
+            # Check if field is already skipped by looking at form_data_manager
+            already_skipped = session.form_data_manager.get_skipped_field_names()
+            if field_name and field_name not in already_skipped:
+                # Use form_data_manager.skip_field() to properly persist the skip
+                # The old code used session.skipped_fields.append() which didn't persist
+                # because skipped_fields is a property that returns a copy of the list
+                session.form_data_manager.skip_field(
+                    field_name=field_name,
+                    turn=getattr(session.context_window, 'current_turn', 0)
+                )
+                # Also update context window for proper field tracking
+                if hasattr(session.context_window, 'mark_field_skipped'):
+                    session.context_window.mark_field_skipped(field_name)
                 skipped_names.append(field.get('label', field_name))
         
         if skipped_names:

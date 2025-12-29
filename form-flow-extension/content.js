@@ -1036,12 +1036,20 @@
 
         initSpeechRecognition() {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!SpeechRecognition) return;
+            if (!SpeechRecognition) {
+                console.error('FormFlow: SpeechRecognition API not available in this browser');
+                return;
+            }
 
+            console.log('FormFlow: Initializing SpeechRecognition...');
             this.recognition = new SpeechRecognition();
             this.recognition.continuous = true;
             this.recognition.interimResults = true;
             this.recognition.lang = 'en-US';
+
+            this.recognition.onstart = () => {
+                console.log('FormFlow: Speech recognition started');
+            };
 
             this.recognition.onresult = (event) => {
                 let interimTranscript = '';
@@ -1056,6 +1064,8 @@
                     }
                 }
 
+                console.log('FormFlow: Transcription -', { interim: interimTranscript, final: finalTranscript });
+
                 // Update live transcription display
                 if (interimTranscript) {
                     this.updateTranscription(interimTranscript, false);
@@ -1069,10 +1079,43 @@
                 }
             };
 
+            this.recognition.onerror = (event) => {
+                console.error('FormFlow: Speech recognition error:', event.error, event);
+
+                // Show error to user
+                let errorMessage = 'Voice input error: ';
+                switch (event.error) {
+                    case 'not-allowed':
+                        errorMessage += 'Microphone access denied. Please allow microphone permission.';
+                        break;
+                    case 'no-speech':
+                        errorMessage += 'No speech detected. Please try again.';
+                        break;
+                    case 'network':
+                        errorMessage += 'Network error. Speech recognition requires internet.';
+                        break;
+                    case 'audio-capture':
+                        errorMessage += 'No microphone found. Please check your audio settings.';
+                        break;
+                    case 'aborted':
+                        errorMessage += 'Voice input was aborted.';
+                        break;
+                    default:
+                        errorMessage += event.error || 'Unknown error occurred.';
+                }
+
+                // Update UI to show error
+                this.updateTranscription(errorMessage, true);
+                this.stopListening();
+            };
+
             this.recognition.onend = () => {
+                console.log('FormFlow: Speech recognition ended');
                 if (this.isListening) this.stopListening();
                 this.updateMicButtonState();
             };
+
+            console.log('FormFlow: SpeechRecognition initialized successfully');
         }
 
         updateMicButtonState() {
@@ -1275,7 +1318,17 @@
                     case 'checkbox':
                         return this.fillCheckbox(element, value);
 
+                    case 'file':
+                        // File inputs cannot be filled programmatically for security reasons
+                        console.log('FormFlow: Skipping file input - cannot fill programmatically');
+                        return false;
+
                     default:
+                        // Check if it's a file input by element type (safety check)
+                        if (element.type === 'file') {
+                            console.log('FormFlow: Skipping file input - cannot fill programmatically');
+                            return false;
+                        }
                         if (element.getAttribute('role') === 'combobox') {
                             return this.fillCombobox(element, value);
                         }
