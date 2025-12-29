@@ -148,13 +148,11 @@ def get_speech_data() -> Dict[str, Any]:
 
 def update_speech_data(new_data: Dict[str, Any]) -> None:
     """Update speech data cache."""
-    global _global_speech_data
     _global_speech_data.update(new_data)
 
 
 def clear_speech_data() -> None:
     """Clear speech data cache."""
-    global _global_speech_data
     _global_speech_data.clear()
 
 

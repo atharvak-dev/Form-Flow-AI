@@ -129,8 +129,6 @@ async def _background_worker():
     
     Runs continuously and picks tasks from the queue.
     """
-    global _worker_running
-    
     queue = await _get_queue()
     
     while True:
