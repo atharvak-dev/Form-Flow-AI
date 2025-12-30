@@ -19,6 +19,13 @@ Run:
 
 
 import warnings
+import sys
+import asyncio
+
+# Fix for Playwright on Windows - ProactorEventLoop required for subprocess
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
 # Suppress Pydantic V1 warning from LangChain
 warnings.filterwarnings("ignore", message=".*Core Pydantic V1 functionality.*")
 

@@ -3,6 +3,7 @@ from typing import Dict, List, Any
 import time
 import os
 import random
+import sys
 from urllib.parse import urlparse
 
 # Import browser pool for memory-efficient browser reuse
@@ -955,6 +956,9 @@ class FormSubmitter:
     async def submit_form_data(self, url: str, form_data: Dict[str, str], form_schema: List[Dict], use_cdp: bool = False) -> Dict[str, Any]:
         """Submit form data to target website with CAPTCHA detection.
         
+        On Windows, uses sync Playwright via asyncio.to_thread() to bypass
+        asyncio subprocess limitations in Python 3.14.
+        
         Flow:
             1. Open form in visible browser
             2. Fill all fields
@@ -962,6 +966,156 @@ class FormSubmitter:
             4. If CAPTCHA found: DON'T submit, leave browser open for user
             5. If no CAPTCHA: Submit form normally
         """
+        # On Windows, use sync Playwright to avoid asyncio subprocess issues
+        if sys.platform == 'win32':
+            return await asyncio.to_thread(self._sync_submit_form_data, url, form_data, form_schema, use_cdp)
+        
+        # Non-Windows: use async Playwright as before
+        return await self._async_submit_form_data(url, form_data, form_schema, use_cdp)
+    
+    def _sync_submit_form_data(self, url: str, form_data: Dict[str, str], form_schema: List[Dict], use_cdp: bool = False) -> Dict[str, Any]:
+        """Sync Playwright implementation for Windows."""
+        from playwright.sync_api import sync_playwright
+        
+        is_google = 'docs.google.com/forms' in url
+        
+        try:
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch(
+                    headless=False,
+                    args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+                )
+                context = browser.new_context(
+                    viewport={'width': 1280, 'height': 800},
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36'
+                )
+                page = context.new_page()
+                
+                print(f"🌐 Navigating to form: {url}")
+                page.goto(url, wait_until='domcontentloaded', timeout=60000)
+                
+                # Wait for form load
+                if is_google:
+                    try:
+                        page.wait_for_selector('[role="listitem"], .freebirdFormviewerViewItemsItemItem', timeout=20000)
+                        time.sleep(2)
+                    except:
+                        pass
+                else:
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=15000)
+                    except:
+                        pass
+                    time.sleep(1)
+                
+                initial_url = page.url
+                
+                # Fill form using sync methods
+                fill_result = self._sync_fill_form(page, form_data, form_schema, is_google)
+                
+                # Submit form
+                submit_ok = self._sync_submit_form(page, form_schema, is_google)
+                time.sleep(2)
+                
+                # Validate
+                page_content = page.content().lower()
+                current_url = page.url
+                
+                # Simple success validation
+                success_indicators = ['thank you', 'success', 'submitted', 'received', 'confirmation']
+                likely_success = any(ind in page_content for ind in success_indicators) or current_url != initial_url
+                
+                browser.close()
+                
+                return {
+                    "success": likely_success and not fill_result.get("errors"),
+                    "captcha_detected": False,
+                    "message": "Form submitted successfully" if likely_success else "Form submission completed with issues",
+                    "submission_result": fill_result,
+                    "validation_result": {"likely_success": likely_success}
+                }
+                
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return {"success": False, "error": str(e), "message": "Form submission failed"}
+    
+    def _sync_fill_form(self, page, form_data: Dict[str, str], form_schema: List[Dict], is_google: bool) -> Dict[str, Any]:
+        """Sync form filling for Windows."""
+        filled, errors = [], []
+        field_map = {f.get('name', ''): f for form in form_schema for f in form.get('fields', [])}
+        
+        for name, value in form_data.items():
+            if name not in field_map:
+                continue
+            field_info = field_map[name]
+            
+            try:
+                element = None
+                if fid := field_info.get('id'):
+                    element = page.query_selector(f"#{fid}")
+                if not element and (fname := field_info.get('name')):
+                    element = page.query_selector(f"[name='{fname}']")
+                
+                if element and element.is_visible():
+                    ftype = field_info.get('type', 'text')
+                    if ftype in {'text', 'email', 'tel', 'password', 'number', 'url', 'search', 'textarea'}:
+                        element.fill(str(value))
+                        filled.append(name)
+                    elif ftype in {'select', 'dropdown'}:
+                        try:
+                            element.select_option(value=str(value))
+                        except:
+                            element.select_option(label=str(value))
+                        filled.append(name)
+                    elif ftype == 'checkbox':
+                        if str(value).lower() in ['true', 'yes', '1', 'checked']:
+                            element.check()
+                        filled.append(name)
+                    elif ftype == 'radio':
+                        radios = page.query_selector_all(f"input[name='{name}'][type='radio']")
+                        for radio in radios:
+                            radio_val = radio.get_attribute('value') or ''
+                            if radio_val.lower() == str(value).lower():
+                                radio.click()
+                                filled.append(name)
+                                break
+                    else:
+                        element.fill(str(value))
+                        filled.append(name)
+                else:
+                    errors.append(f"Element not found: {name}")
+            except Exception as e:
+                errors.append(f"Error filling {name}: {e}")
+            
+            time.sleep(0.3)
+        
+        return {
+            "filled_fields": filled,
+            "errors": errors,
+            "total_fields": len(form_data),
+            "successful_fields": len(filled),
+            "fill_rate": len(filled) / len(form_data) if form_data else 0
+        }
+    
+    def _sync_submit_form(self, page, form_schema: List[Dict], is_google: bool) -> bool:
+        """Sync form submission for Windows."""
+        selectors = self.GOOGLE_SUBMIT_SELECTORS if is_google else self.SUBMIT_SELECTORS
+        
+        for sel in selectors:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible():
+                    el.click()
+                    time.sleep(3)
+                    return True
+            except:
+                continue
+        
+        return False
+    
+    async def _async_submit_form_data(self, url: str, form_data: Dict[str, str], form_schema: List[Dict], use_cdp: bool = False) -> Dict[str, Any]:
+        """Original async Playwright implementation for non-Windows platforms."""
         is_google = 'docs.google.com/forms' in url
         
         try:

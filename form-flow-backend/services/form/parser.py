@@ -3,6 +3,7 @@ Form Parser - Optimized & Refactored
 Scrapes form fields from any URL including Google Forms with iframe support.
 """
 
+from playwright.sync_api import sync_playwright
 from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 from typing import List, Dict, Any
@@ -10,6 +11,7 @@ import asyncio
 from asyncio import TimeoutError
 import re
 import os
+import sys
 
 # Import modular extractors
 from services.form.extractors.standard import extract_standard_forms as _modular_extract_standard
@@ -61,6 +63,9 @@ async def get_form_schema(url: str, generate_speech: bool = True, wait_for_dynam
     """
     Scrape form fields from a URL. Supports Google Forms and standard HTML forms.
     
+    On Windows, uses sync Playwright via asyncio.to_thread() to bypass
+    asyncio subprocess limitations in Python 3.14.
+    
     Args:
         url: Target URL to scrape
         generate_speech: Whether to generate TTS for fields
@@ -69,6 +74,144 @@ async def get_form_schema(url: str, generate_speech: bool = True, wait_for_dynam
     Returns:
         Dict with 'forms', 'url', 'is_google_form', 'total_forms', 'total_fields'
     """
+    # On Windows, use sync Playwright to avoid asyncio subprocess issues
+    if sys.platform == 'win32':
+        return await asyncio.to_thread(_sync_get_form_schema, url, generate_speech, wait_for_dynamic)
+    
+    # Non-Windows: use async Playwright as before
+    return await _async_get_form_schema(url, generate_speech, wait_for_dynamic)
+
+
+def _sync_get_form_schema(url: str, generate_speech: bool = True, wait_for_dynamic: bool = True) -> Dict[str, Any]:
+    """Sync Playwright implementation for Windows."""
+    is_google_form = 'docs.google.com/forms' in url
+    
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=False, args=BROWSER_ARGS)
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36",
+                viewport={"width": 1920, "height": 1080},
+                locale="en-US"
+            )
+            context.add_init_script(STEALTH_SCRIPT)
+            
+            page = context.new_page()
+            page.route("**/*", lambda r: r.abort() if r.request.resource_type in {"media", "font"} else r.continue_())
+            
+            print(f"🔗 Navigating to {'Google Form' if is_google_form else 'page'}...")
+            page.goto(url, wait_until="domcontentloaded", timeout=120000)
+            
+            # Wait for content
+            if is_google_form:
+                _sync_wait_for_google_form(page)
+            else:
+                try:
+                    page.wait_for_load_state("networkidle", timeout=10000)
+                except:
+                    pass
+                import time
+                time.sleep(2)
+            
+            print("✓ Page loaded, extracting forms...")
+            
+            # Extract forms using sync JS evaluation
+            html_content = page.content()
+            forms_data = _extract_with_beautifulsoup(html_content)
+            
+            # Also try the JS extraction
+            if not forms_data:
+                forms_data = page.evaluate(_get_standard_extraction_js())
+            
+            print(f"✓ Found {len(forms_data)} form(s)")
+            
+            browser.close()
+            
+            # Process and enrich fields
+            fields = _process_forms(forms_data)
+            
+            result = {
+                'forms': fields,
+                'url': url,
+                'is_google_form': is_google_form,
+                'total_forms': len(fields),
+                'total_fields': sum(len(f['fields']) for f in fields)
+            }
+            
+            # Generate speech if requested
+            if generate_speech and fields:
+                result['speech'] = _generate_speech(fields)
+            
+            return result
+            
+    except Exception as e:
+        print(f"❌ Scraping failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return {'forms': [], 'url': url, 'error': str(e)}
+
+
+def _sync_wait_for_google_form(page):
+    """Sync version of waiting for Google Form content."""
+    import time
+    selectors = ['.Qr7Oae', '[role="listitem"]', '.freebirdFormviewerViewNumberedItemContainer']
+    for selector in selectors:
+        try:
+            page.wait_for_selector(selector, timeout=10000)
+            return
+        except:
+            continue
+    time.sleep(3)
+
+
+def _get_standard_extraction_js():
+    """Return the JS code for standard form extraction."""
+    return """
+        () => {
+            const getText = el => el ? (el.innerText || el.textContent || '').trim() : '';
+            
+            return Array.from(document.querySelectorAll('form')).map((form, idx) => {
+                const fields = [];
+                
+                Array.from(form.querySelectorAll('input, select, textarea')).forEach(field => {
+                    const type = field.type || field.tagName.toLowerCase();
+                    const name = field.name || field.id;
+                    
+                    if (!name || type === 'submit' || type === 'button' || type === 'hidden') return;
+                    
+                    if (field.tagName === 'SELECT') {
+                        fields.push({
+                            name: name, type: 'dropdown', tagName: 'select',
+                            label: getText(form.querySelector(`label[for="${field.id}"]`)) || name,
+                            required: field.required,
+                            options: Array.from(field.options).filter(o => o.value).map(o => ({
+                                value: o.value, label: o.text.trim()
+                            }))
+                        });
+                        return;
+                    }
+                    
+                    fields.push({
+                        name: name, type: type, tagName: field.tagName.toLowerCase(),
+                        label: getText(form.querySelector(`label[for="${field.id}"]`)) || field.placeholder || name,
+                        placeholder: field.placeholder || null,
+                        required: field.required
+                    });
+                });
+                
+                return {
+                    formIndex: idx,
+                    action: form.action || null,
+                    method: (form.method || 'GET').toUpperCase(),
+                    fields: fields
+                };
+            }).filter(f => f.fields.length > 0);
+        }
+    """
+
+
+async def _async_get_form_schema(url: str, generate_speech: bool = True, wait_for_dynamic: bool = True) -> Dict[str, Any]:
+    """Original async Playwright implementation for non-Windows platforms."""
     is_google_form = 'docs.google.com/forms' in url
     
     try:
@@ -102,10 +245,7 @@ async def get_form_schema(url: str, generate_speech: bool = True, wait_for_dynam
             # Extract forms
             forms_data = await _extract_google_forms(page) if is_google_form else await _extract_all_frames(page, url)
             
-            # ================================================================
-            # CLICK CUSTOM DROPDOWNS TO EXTRACT OPTIONS
-            # Ant Design/React Select only render options when clicked
-            # ================================================================
+            # Click custom dropdowns to extract options
             if not is_google_form and forms_data:
                 print("🔽 Extracting custom dropdown options...")
                 forms_data = await _extract_custom_dropdown_options(page, forms_data)
