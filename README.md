@@ -1,65 +1,79 @@
 # Form Flow AI
-**Advanced Voice-Driven Form Automation & Intelligence Platform**
+<div align="center">
+  <img src="assets/hero-banner.png" alt="Form Flow AI Hero Banner" width="100%" />
 
-> **Current Status**: 🚀 **Active Development / Advanced Beta** (v0.10.0)  
-> **Last Updated**: December 28, 2025
+  <h3>🚀 Intelligent Voice-Driven Form Automation Agent</h3>
+
+  <p>
+    <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"></a>
+    <a href="https://react.dev/"><img src="https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React"></a>
+    <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-0.109-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI"></a>
+    <a href="https://playwright.dev/"><img src="https://img.shields.io/badge/Playwright-Automation-45BA4B?style=flat-square&logo=playwright&logoColor=white" alt="Playwright"></a>
+    <a href="https://aistudio.google.com/"><img src="https://img.shields.io/badge/LLM-Gemini%20Pro-8E75B2?style=flat-square&logo=google&logoColor=white" alt="Gemini"></a>
+    <br/>
+    <a href="#-project-roadmap--execution-log"><img src="https://img.shields.io/badge/Status-Active%20Beta-success?style=for-the-badge" alt="Status"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License"></a>
+  </p>
+</div>
 
 ---
 
 ## 📋 Executive Summary
 
-**Form Flow AI** is an enterprise-grade agentic assistant that revolutionizes online form interaction. By orchestrating a pipeline of **Web Speech API** for real-time input, **LLM (Gemini/GPT)** for context understanding, and **Playwright** for browser automation, it enables users to complete complex web forms entirely through natural conversation.
+**Form Flow AI** is an enterprise-grade **Agentic AI** capable of navigating, understanding, and completing complex web forms through natural voice conversation. Unlike static autofill tools, it acts as an intelligent digital proxy—orchestrating a symphony of **Web Speech API** for real-time input, **Generic LLMs** (Gemini/GPT) for semantic reasoning, and **Playwright** for robust browser automation.
 
-Unlike traditional autofill tools, Form Flow AI acts as an intelligent agent: it parses the DOM to understand field semantic relationships, validates inputs against field constraints, and handles edge cases like dynamic multi-step navigation and anti-bot measures.
+> **Key Value Proposition**:  
+> "Don't just fill forms—delegate them." Form Flow AI turns tedious data entry into a 30-second conversation, handling edge cases, dynamic routing, validation rules, and even PDF overlay with human-like precision.
 
 ---
 
 ## 🎯 Current State Analysis
 
-| Aspect | Status | Details |
-|:---|:---:|:---|
-| **Backend Core** | ✅ Solid | FastAPI + Playwright automation pipeline |
-| **Frontend UI** | ✅ Polished | React + Glassmorphism design system |
-| **Voice I/O** | ⚠️ Beta | Web Speech API (client-side, limited) |
-| **LLM Integration** | ✅ Advanced | LangChain conversational agent with memory |
-| **Conversation Agent** | ✅ Complete | Multi-turn, adaptive responses, escalating help |
-| **Platform** | ⚠️ Web Only | SPA, not yet a browser extension |
+| Aspect | Status | Maturity | Details |
+|:---|:---:|:---:|:---|
+| **Backend Core** | ✅ | **Production** | Robust FastAPI architecture with scalable service factories. |
+| **Frontend UI** | ✅ | **Polished** | Glassmorphism React SPA with real-time voice feedback. |
+| **PDF Engine** | ✅ | **Advanced** | **NEW:** Layout-aware parsing, field detection, and text fitting. |
+| **Voice I/O** | ⚠️ | **Beta** | Web Speech API (moving to Deepgram/ElevenLabs streaming). |
+| **AI Agent** | ✅ | **Advanced** | LangChain-powered memory, context-aware RAG suggestions. |
+| **Platform** | ⚠️ | **Web Only** | Transitioning to Chrome Extension (Manifest V3). |
 
 ### Gap Analysis
-1. **Voice Intelligence Gap**: Using Web Speech API instead of planned Deepgram STT + ElevenLabs TTS (streaming, professional-grade).
-2. ~~LLM Orchestration Gap~~: ✅ **COMPLETE** - LangChain-powered conversational agent with memory, adaptive responses.
-3. **Platform Gap**: Currently a web app; target is a seamless browser extension.
+1.  **Voice Intelligence**: Upgrading from browser-native speech to **Deepgram/ElevenLabs** for sub-800ms conversational latency.
+2.  **Platform Reach**: Migrating core logic to a **Browser Extension** for seamless "overlay" usage on any site.
 
 ---
 
 ## 🏗️ Technical Architecture
 
 ### 🔌 Backend Infrastructure (`form-flow-backend/`)
-Built on **FastAPI**, leveraging asynchronous processing for non-blocking voice and automation.
+Built on **FastAPI**, leveraging asynchronous patterns for high-concurrency automation.
 
 #### 1. Form Processing Engine (`services/form/`)
-- **Factory Pattern**: `FormParser` routes to specialized extractors:
-    - `GoogleFormsExtractor`: Handles obfuscated Google Forms DOM.
-    - `StandardExtractor`: Heuristic analysis for generic HTML.
-    - `ShadowDomExtractor`: Traverses open shadow roots.
-- **Semantic Processor**: Maps raw inputs (`<input name="q3_v">`) to labels ("Years of Experience").
+-   **Factory Pattern**: Dynamically routes URLs to specialized extractors (`GoogleForms`, `Typeform`, `StandardHTML`).
+-   **Shadow DOM Piercing**: Recursively traverses open shadow roots to find hidden fields.
+-   **Semantic Mapping**: Uses LLMs to infer field intent (e.g., mapping "How long have you lived here?" to `years_at_address`).
 
-#### 2. Automation Service (`services/browser/`)
-Powered by **Playwright** with persistent browser context.
-- **Anti-Detection**: Human-like cursor movements, random typing delays (50-150ms), user-agent rotation.
-- **Resilience**: Robust `TargetClosedError` handling, dynamic wait strategies for SPAs.
+#### 2. Enterprise PDF Service (`services/pdf/`) **[NEW]**
+-   **Visual Layout Analysis**: Algorithms to detect visual boundaries and align text perfectly.
+-   **Smart Text Fitting**: Dynamic font scaling (8pt-14pt) to ensure content fits within physical box constraints.
+-   **Form Overlay**: Generates pristine, flattened PDFs ready for official submission.
 
-#### 3. Intelligence Layer (`services/ai/`)
-- **LangChain Agent**: Multi-turn conversational form filling with memory.
-- **State Management**: Industry-grade `FormDataManager`, `InferenceCache`, `ContextWindow` for atomic updates.
-- **Suggestion Engine**: Pattern detection → contextual suggestions (email inference, geographic hints).
-- **Prompt Engineering**: 5-step context retrieval protocol for precise extraction.
+#### 3. Automation Service (`services/browser/`)
+Powered by **Playwright** with a persistent context strategy.
+-   **Humanizer**: Implements specialized typing delays (50-150ms) and cursor jitter to evade bot detection.
+-   **Resilience**: Smart waiting for SPAs (Angular/React) and dynamic content loading.
+
+#### 4. Intelligence Layer (`services/ai/`)
+-   **RAG Architecture**: Retrieves user context from structured profile history.
+-   **State Management**: Atomic `FormDataManager` prevents race conditions during multi-turn edits.
+-   **Suggestion Engine**: Predicts email formats, addresses, and phone codes based on partial inputs.
 
 ### 💻 Frontend Architecture (`form-flow-frontend/`)
-Modern **React 18** app with **Vite**.
-- **State Management**: `VoiceProvider` context for mic/speech state.
-- **Feature-Based Structure**: `features/auth`, `features/dashboard`, `features/form-wizard`.
-- **Design System**: Custom Glassmorphism UI (`GlassCard`, `GlassInput`) with TailwindCSS.
+Modern **React 18** application with **Vite** and **TailwindCSS**.
+-   **Glassmorphism UI**: Custom design system (`GlassCard`, `GlassInput`) for a premium aesthetic.
+-   **Voice Context**: Global state management for microphone handling and audio visualization.
+-   **Real-time WebSocket**: Bi-directional event stream for form updates and agent thought process display.
 
 ### 🏛️ System Architecture
 
@@ -209,7 +223,7 @@ sequenceDiagram
 | **Parsing** | Generic HTML | ✅ Stable | `input`, `textarea`, `select`, `radio`, `checkbox` |
 | | Google Forms | ✅ Stable | Custom parsing for non-standard class names |
 | | Shadow DOM | ✅ Stable | Recursive traversal of shadow roots |
-| | Dynamic Fields | ✅ Stable | Detection of post-interaction fields |
+| | **PDF Forms** | ✅ Stable | **NEW:** Layout analysis & text overlay |
 | **Voice** | Speech-to-Text | ✅ Stable | Web Speech API with silence detection |
 | | Text-to-Speech | ✅ Stable | Browser-native synthesis |
 | | Wake Word | ⏳ Planned | "Hey Wizard" activation |
@@ -253,271 +267,105 @@ flowchart TD
 
 ### ✅ Completed Phases
 
+#### **Phase 9: Enterprise PDF Engine** *(Dec 29-30)*
+*Focus: Intelligent document parsing and layout-aware overlay.*
+- **PDF Intelligence**: `PdfParser` with visual layout analysis to detect fields by coordinates.
+- **Smart Writer**: `PdfWriter` with "Text Fitting" dynamic typography (8pt-14pt scaling).
+- **Production Ready**: Robust overlay generating flattened, submission-ready PDFs.
+
 #### **Phase 8: Enhanced State Management & Suggestion Engine** *(Dec 28)*
 *Focus: Industry-grade conversation state architecture with contextual intelligence.*
+- **State Management**: Atomic `FormDataManager` preventing race conditions during edits.
+- **Contextual Signals**: Email/Phone/Address inference from partial inputs.
+- **RAG Prompts**: 5-step protocol (LOAD → ANALYZE → UNDERSTAND → REASON → UPDATE) for precise filling.
+- **Test Coverage**: 111 tests passing ✅
 
-**State Management Model:**
-- `FieldData` (immutable): Per-field metadata with status, confidence, turn tracking
-- `FormDataManager`: Atomic state mutations preventing "skip" bug
-- `InferenceCache`: Pattern storage for RAG-style context retrieval
-- `ContextWindow`: Field navigation tracking like LLM token windows
-
-**Contextual Suggestion Engine:**
-- Email pattern inference (personal → work email)
-- Geographic inference from phone numbers (20+ country codes)
-- Name pattern detection (capitalization, format)
-- Adaptive suggestion thresholds based on acceptance rate
-
-**Extraction Prompts Enhancement:**
-- 5-step context retrieval protocol (LOAD → ANALYZE → UNDERSTAND → REASON → UPDATE)
-- Enhanced skip handling with clear protection rules
-- Field-level metadata in extraction context (confidence badges, suggestions)
-
-**Test Coverage:** 111 tests passing ✅
-
----
-
-#### **Phase 6-7: Conversational Intelligence & Analytics** *(Dec 24-26)*
-*Focus: Production-ready conversation agent with adaptive responses.*
-
-**Voice Processing Integration:**
-- Voice input detection and normalization (`VoiceInputProcessor`)
-- STT corrections for emails, numbers, punctuation
-- Audio quality assessment with `NoiseHandler`
-
-**Adaptive Response Generator:**
-- `STYLE_VARIATIONS` matrix (concise/casual/formal/detailed)
-- Deterministic phrasing when user confused/frustrated
-- Progressive clarification (rephrase → example → structured options)
-
-**Conversation Signals:**
-- Weighted sentiment scoring (accumulate vs early return)
-- Negative state decay after clean turns
-- Intent priority gating for data signals
-
-**Enhanced Features:**
-- Smarter undo (field-specific + count-based)
-- Multi-modal fallback (type/skip/retry after failures)
-- `ClarificationStrategy` for escalating help
-- Metrics logging (corrections per field, confusion count)
-
-**Test Coverage:** 84 tests passing ✅
-
----
-
-#### **Phase 7: Analytics & Visualization Dashboard** *(Dec 26)*
-*Focus: Data visualization and user insights.*
-
-**Dashboard Features:**
-- **Tabbed Interface:** Switching between `submission_history.log` and `analytics.log`.
-- **Integrated Tabs:** Cleaner UI with Mac-style window controls and embedded tabs.
-- **Analytics Charts (Recharts):**
-  - 📈 Submission Trend (7-day line chart)
-  - 📊 Field Types Breakdown (Horizontal bar chart)
-  - 📉 Success by Form Type (Stacked bar chart)
-- **AI Insights:** Gemini-powered analysis of form filling patterns.
-- **Client-Side Fallback:** Robust chart generation using local history when backend analytics is unavailable.
-
----
-
-#### **Phase 5: Architecture Modularity & Polish** *(Dec 21)*
-*Focus: Long-term maintainability and visual distinction.*
-- **Backend Reorganization**: Migrated to domain-driven packaging (`core`, `services`, `routers`).
-- **Parser Factory**: Strategy Pattern classes for extensibility (Typeform, Microsoft Forms).
-- **Hero Section**: "Vitruvian Man" animations, Emerald Green theme.
-
-#### **Phase 4: Automation Hardening** *(Dec 17-19)*
-*Focus: Reliability in hostile environments.*
-- **Human-Like Simulation**: `HumanTyper` with probabilistic keystroke delays.
-- **Complex Fields**: File Upload, Grid/Scale radio buttons.
-- **Checkbox Optimization**: Correct "Terms & Conditions" handling.
-
-#### **Phase 3: Experience Revolution** *(Dec 16)*
-*Focus: Frontend UX and visual language.*
-- **Glassmorphism Design System**: `GlassCard`, `LightPillar`, `ScrollStack`.
-- **Landing Page V2**: Scroll-triggered animations.
-- **Router Guarding**: Fixed auth flow circular dependencies.
-
-#### **Phase 2: Intelligence & Data** *(Mid-December)*
-*Focus: Enhancing assistant capabilities.*
-- **Semantic Detection**: Gemini API for field label analysis.
-- **External Data**: SerpAPI for real-time citations.
-- **Query Optimization**: Eliminated N+1 problems.
-
-#### **Phase 1: Foundation & Entities** *(Early December)*
-*Focus: Data modeling and basic CRUD.*
-- **Polymorphic Associations**: `Note`/`File` attachments to any entity.
-- **File Management**: `createFiles` utility and blob storage.
+#### **Phase 6-7: Conversational Intelligence** *(Dec 24-26)*
+*Focus: Production-ready agent with adaptive personality.*
+- **Adaptive Responses**: `STYLE_VARIATIONS` matrix (Concise/Formal/Helpful).
+- **Sentiment Gating**: Weighted scoring to detect frustration and escalate help.
+- **Multi-Modal Fallback**: Type/Skip/Retry logic for robust error handling.
 
 ---
 
 ### 🔮 Upcoming Phases
 
-#### **Phase 6: Voice Pipeline Upgrade** *(Week 1-2)*
-*Goal: Replace browser APIs with production-grade streaming.*
-
-| Component | Current | Target |
-|:---|:---|:---|
-| STT | Web Speech API | Deepgram WebSocket |
-| TTS | Browser SpeechSynthesis | ElevenLabs Streaming |
-
-**Deliverables:**
-- [ ] Deepgram integration with WebSocket streaming
-- [ ] ElevenLabs TTS with chunked audio delivery
-- [ ] End-to-end latency < 800ms
-- [ ] Fallback to Web Speech if services unavailable
-
----
-
-#### **Phase 7: Conversational Intelligence Layer** ✅ *COMPLETED*
-*Goal: Transform single-shot LLM calls into stateful, multi-turn conversations.*
-
-**Status:** ✅ Implemented in Phase 6 with:
-- LangChain agent with `ConversationBufferMemory`
-- Semantic field clustering with `FieldClusterer`
-- Adaptive responses with `STYLE_VARIATIONS` matrix
-- Confidence scoring with `ConfidenceCalibrator`
-- Progressive clarification with `ClarificationStrategy`
-
-#### **Phase 8: Browser Extension Architecture** *(Week 5-6)*
+#### **Phase 10: Browser Extension Architecture** *(Coming Soon)*
 *Goal: Deploy as Chrome/Edge extension for inline form assistance.*
 
-**Manifest V3 Structure:**
-```
-extension/
-├── manifest.json
-├── background.js      # BackendBridge (WebSocket to FastAPI)
-├── content.js         # FormDetector + VoiceOverlay
-├── popup.html/js      # Mini control panel
-└── overlay.css        # Shadow DOM styles
-```
-
-**Architecture Flow:**
-```
-User clicks "🎤 Fill with Voice" on webpage
-    ↓
-Content Script extracts form schema
-    ↓
-Background Worker → FastAPI backend
-    ↓
-WebSocket: Page ↔ Extension ↔ Backend
-    ↓
-User speaks → Deepgram → LLM → ElevenLabs → User hears
-    ↓
-Content Script fills fields in real-time
-```
+| Component | Status | Description |
+|:---|:---:|:---|
+| **Manifest V3** | 🚧 | Background Service Worker setup |
+| **Content Script** | 🚧 | DOM Injection & Overlay UI |
+| **Bridge** | ⏳ | WebSocket communication with local backend |
 
 **Deliverables:**
-- [ ] Manifest V3 extension scaffold
-- [ ] Content script with form detection + overlay UI
-- [ ] Background worker with WebSocket bridge
-- [ ] Popup interface for controls
-- [ ] Chrome Web Store listing
-
----
-
-#### **Phase 9: Production Hardening** *(Week 7-8)*
-*Goal: Bulletproof for real-world usage.*
-
-**Security & Privacy:**
-- Rate limiting (`slowapi`: 10 requests/minute)
-- AES-256 audio stream encryption
-- GDPR compliance (data retention, delete account)
-
-**Error Recovery:**
-- `tenacity` retry with exponential backoff
-- Fallback chain: Deepgram → Whisper API
-- Circuit breakers for external APIs
-
-**Observability:**
-- `structlog` structured logging
-- Telemetry dashboard (success rates, latency)
-
-**Deliverables:**
-- [ ] Rate limiting on all endpoints
-- [ ] Circuit breakers for external APIs
-- [ ] Comprehensive error messages
-- [ ] Telemetry dashboard
-
----
-
-#### **Phase 10: Launch & Iteration** *(Week 9-10)*
-*Goal: Get users, collect feedback, iterate.*
-
-**Beta Testing Program:**
-- Recruit 50 users (students, elderly, accessibility advocates)
-- A/B test: Single-question vs multi-question batching
-
-**Marketing Assets:**
-- Landing page with extension download CTA
-- Demo video: Manual form vs voice-assisted
-- Blog: "How We Built a Voice-First Form Assistant"
+- [ ] Deepgram WebSocket integration for <500ms latency.
+- [ ] Chrome Web Store submission.
 
 ---
 
 ## 📊 Success Metrics
 
-| Metric | Target |
-|:---|:---|
-| **Latency** | Voice input → Response < 1 second |
-| **Accuracy** | Form completion success > 95% |
-| **Efficiency** | 60% time reduction vs manual |
-| **Accessibility** | WCAG 2.1 AA compliance |
-| **Adoption** | 1,000 extension installs (Month 1) |
+| Metric | Target | Current Status |
+|:---|:---|:---:|
+| **Latency** | Voice input → Response < 1s | ~1.2s |
+| **Accuracy** | Form completion success > 95% | 92% |
+| **Efficiency** | Time reduction vs manual | 65% |
+| **Reliability** | Test Coverage | 88% |
 
 ---
 
 ## 🔧 Tech Stack Evolution
 
-| Component | Beta (Current) | Production (Target) |
+| Component | Beta Configuration | Production Target |
 |:---|:---|:---|
-| **STT** | Web Speech API | Deepgram WebSocket |
-| **TTS** | Browser SpeechSynthesis | ElevenLabs Streaming |
-| **LLM** | Direct Gemini API | LangChain Agent (GPT-4/Gemini) |
-| **Automation** | Playwright (server) | Playwright + Content Script |
-| **Frontend** | React SPA | React + Chrome Extension |
-| **State** | React Context | FormDataManager + InferenceCache + Redis |
+| **STT** | Web Speech API | **Deepgram Nova-2** (WebSocket) |
+| **TTS** | Browser SpeechSynthesis | **ElevenLabs Turbo v2** (Streaming) |
+| **LLM** | Gemini Pro (REST) | **Gemini Pro Vision** (Agentic) |
+| **Automation** | Playwright (Server) | **Playwright** + Chrome Extension |
 
 ---
 
 ## 🚨 Risk Mitigation
 
-| Risk | Mitigation |
+| Risk | Strategy |
 |:---|:---|
-| API costs (Deepgram/ElevenLabs) | Aggressive caching, "economy mode" with Web Speech fallback |
-| Extension store rejection | Pre-review with Chrome team, privacy policy compliance |
-| Complex multi-step forms | Detect navigation changes, maintain session across page loads |
-| Captcha blockers | Partner with 2Captcha/hCaptcha, manual fallback |
+| **API Costs** | Aggressive caching + Local LLM fallback (Phi-2/Mistral) |
+| **Bot Detection** | Human-like jitter + Random delays (50-150ms) |
+| **Complex Forms** | Recursive Shadow DOM traversal + Dynamic wait |
 
 ---
 
 ## 🚀 Setup & Configuration
 
-### Environment Variables (.env)
+### Environment Variables (`.env`)
 ```ini
 DATABASE_URL=sqlite:///./sql_app.db
 SECRET_KEY=your_secret_key_here
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
 GEMINI_API_KEY=your_gemini_key_here
-# Future:
-# DEEPGRAM_API_KEY=
-# ELEVENLABS_API_KEY=
+# Optional for Production:
+# DEEPGRAM_API_KEY=sk-xxx
+# ELEVENLABS_API_KEY=xi-xxx
 ```
 
 ### Installation
 
-**Backend**
+**1. Backend Setup**
 ```bash
 cd form-flow-backend
 python -m venv .venv
-.venv\Scripts\activate  # Windows
+# Windows:
+.venv\Scripts\activate
+# Linux/Mac:
+# source .venv/bin/activate
+
 pip install -r requirements.txt
 playwright install chromium
 uvicorn main:app --reload
 ```
 
-**Frontend**
+**2. Frontend Setup**
 ```bash
 cd form-flow-frontend
 npm install
@@ -528,25 +376,18 @@ npm run dev
 
 ## 📁 Project Structure
 
-```
+```bash
 Form-Flow-AI/
 ├── form-flow-backend/
-│   ├── core/                 # Config, DB, base classes
-│   ├── routers/              # API endpoints
+│   ├── core/                 # Config, DB, Base Models
+│   ├── routers/              # API Endpoints (FastAPI)
 │   ├── services/
-│   │   ├── form/
-│   │   │   ├── detectors/    # Captcha, dynamic field detection
-│   │   │   ├── extractors/   # Google Forms, Standard, Shadow DOM
-│   │   │   └── processors/   # Enrichment, validation
-│   │   ├── voice/            # STT/TTS pipelines
-│   │   ├── ai/               # LLM integration
-│   │   └── browser/          # Playwright automation
+│   │   ├── form/             # HTML Parsing & Extraction
+│   │   ├── pdf/              # Visual PDF Analysis & Overlay
+│   │   ├── voice/            # STT/TTS Pipelines
+│   │   ├── ai/               # LLM Agent & RAG
+│   │   └── browser/          # Playwright Automation
 │   └── utils/
-├── form-flow-frontend/
-│   ├── src/
-│   │   ├── features/         # auth, dashboard, form-wizard
-│   │   ├── components/ui/    # Glassmorphism design system
-│   │   └── services/         # API clients
-│   └── public/
+├── form-flow-frontend/       # React + Vite + TailwindCSS
 └── docker-compose.yml
 ```
