@@ -61,6 +61,124 @@ Modern **React 18** app with **Vite**.
 - **Feature-Based Structure**: `features/auth`, `features/dashboard`, `features/form-wizard`.
 - **Design System**: Custom Glassmorphism UI (`GlassCard`, `GlassInput`) with TailwindCSS.
 
+### 🏛️ System Architecture
+
+```mermaid
+graph TD
+    subgraph Frontend "Frontend & Extension"
+        SPA[React SPA]
+        Ext[Browser Extension]
+    end
+
+    subgraph Backend "Form Flow Backend (FastAPI)"
+        API[API Gateway]
+        Orch[Orchestrator]
+        AI[AI Service]
+        Voice[Voice Service]
+        Form[Form Engine]
+        PDF[PDF Service]
+        DB[(Database)]
+    end
+
+    subgraph External "External Services"
+        LLM[Gemini LLM]
+        STT[Deepgram/Vosk]
+        TTS[ElevenLabs]
+        Browser[Playwright Browser]
+    end
+
+    SPA <--> API
+    Ext <--> API
+    API --> Orch
+    Orch --> AI
+    Orch --> Voice
+    Orch --> Form
+    Orch --> PDF
+    AI <--> LLM
+    Voice <--> STT
+    Voice <--> TTS
+    Form <--> Browser
+    Browser --> Target[Target Website]
+    Orch <--> DB
+```
+
+## 🧩 Service Design
+
+### AI Service
+Orchestrates conversation and state management using Gemini and RAG.
+
+```mermaid
+classDiagram
+    class ConversationAgent {
+        +process_message(input)
+        +update_state()
+    }
+    class GeminiService {
+        +generate_response()
+        +extract_entities()
+    }
+    class RAGService {
+        +retrieve_context()
+        +store_memory()
+    }
+    class SuggestionEngine {
+        +generate_suggestions()
+    }
+
+    ConversationAgent --> GeminiService
+    ConversationAgent --> RAGService
+    ConversationAgent --> SuggestionEngine
+```
+
+### Form Service
+Handles form schema extraction and automated submission via Playwright.
+
+```mermaid
+classDiagram
+    class FormParser {
+        +parse_schema(url)
+        +detect_captchas()
+    }
+    class FormSubmitter {
+        +fill_form(data)
+        +submit()
+    }
+    class BrowserPool {
+        +get_page()
+        +release_page()
+    }
+    class BaseExtractor {
+        <<interface>>
+        +extract_fields()
+    }
+
+    FormParser --> BaseExtractor
+    BaseExtractor <|-- GoogleFormsExtractor
+    BaseExtractor <|-- StandardExtractor
+    FormSubmitter --> BrowserPool
+```
+
+### PDF Service
+Intelligent PDF form parsing and writing with layout analysis.
+
+```mermaid
+classDiagram
+    class PdfParser {
+        +extract_fields()
+        +analyze_layout()
+    }
+    class PdfWriter {
+        +overlay_data()
+        +flatten()
+    }
+    class TextFitter {
+        +calculate_font_size()
+    }
+
+    PdfParser --> PdfWriter
+    PdfWriter --> TextFitter
+```
+
 ### 🪄 How Magic Fill Works
 
 ```mermaid
