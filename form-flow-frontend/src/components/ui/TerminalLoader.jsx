@@ -15,6 +15,15 @@ const TerminalLoader = ({ url }) => {
     const logsEndRef = useRef(null);
     const processedMilestones = useRef(new Set());
 
+    // Safely extract hostname or use fallback
+    const getDisplayHost = () => {
+        try {
+            return new URL(url).hostname;
+        } catch {
+            return url || 'document';
+        }
+    };
+
     // Dynamic Theme Styles
     const containerClasses = isDark
         ? "bg-black/40 border-white/20 shadow-2xl"
@@ -55,7 +64,7 @@ const TerminalLoader = ({ url }) => {
             };
 
             tryAddLog(2, 'Initialize engine v2.0.4');
-            tryAddLog(8, `Target confirmed: ${new URL(url).hostname}`);
+            tryAddLog(8, `Target confirmed: ${getDisplayHost()}`);
             tryAddLog(15, 'Handshaking secured connection...');
             tryAddLog(25, 'Parsing DOM structure tree...');
             tryAddLog(38, 'Identifying interactive fields...');
@@ -162,7 +171,7 @@ const TerminalLoader = ({ url }) => {
 
                     <div className="mt-2 flex items-center gap-2 text-green-500 border-t border-white/10 pt-2 shrink-0">
                         <span className="animate-pulse">_</span>
-                        <span className="text-xs text-white/30">{new URL(url).hostname}</span>
+                        <span className="text-xs text-white/30">{getDisplayHost()}</span>
                     </div>
                 </div>
             </div>

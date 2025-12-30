@@ -212,7 +212,7 @@ export const PromptInputBox = React.forwardRef((props, ref) => {
 
       if (validTypes.includes(fileExt)) {
         setAttachedFile(file);
-        setInput(`📎 ${file.name}`);
+        setInput(`${file.name}`);
       } else {
         alert('Please upload a PDF or Word document');
       }

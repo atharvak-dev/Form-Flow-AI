@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
-import { CheckCircle, Send, AlertTriangle, Download, FileText, Copy, RotateCcw } from 'lucide-react';
+import { CheckCircle, Send, AlertTriangle, Download, FileText, Copy, RotateCcw, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { submitForm } from '@/services/api';
+import { submitForm, fillPdf, getPdfDownloadUrl } from '@/services/api';
 import { RatingInteraction } from '@/components/ui/RatingInteraction';
 
-const FormCompletion = ({ formData, formSchema, originalUrl, onReset }) => {
+const FormCompletion = ({ formData, formSchema, originalUrl, pdfId, onReset }) => {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [submissionResult, setSubmissionResult] = useState(null);
+    const [isDownloading, setIsDownloading] = useState(false);
 
     // Save rating to localStorage
     const handleRatingChange = (rating) => {
@@ -41,7 +42,35 @@ const FormCompletion = ({ formData, formSchema, originalUrl, onReset }) => {
         }
     };
 
-    const downloadFormData = () => {
+    const downloadFormData = async () => {
+        // If we have a pdfId, try to fill and download the PDF
+        if (pdfId) {
+            setIsDownloading(true);
+            try {
+                const response = await fillPdf(pdfId, formData);
+                if (response.success && response.download_id) {
+                    // Open download URL
+                    const downloadUrl = getPdfDownloadUrl(response.download_id);
+                    window.open(downloadUrl, '_blank');
+                } else {
+                    alert('Failed to generate PDF: ' + (response.message || 'Unknown error'));
+                    // Fallback to JSON
+                    downloadAsJson();
+                }
+            } catch (error) {
+                console.error('PDF download error:', error);
+                alert('PDF download failed. Downloading as JSON instead.');
+                downloadAsJson();
+            } finally {
+                setIsDownloading(false);
+            }
+        } else {
+            // No PDF - download as JSON
+            downloadAsJson();
+        }
+    };
+
+    const downloadAsJson = () => {
         const dataStr = JSON.stringify(formData, null, 2);
         const dataBlob = new Blob([dataStr], { type: 'application/json' });
         const url = URL.createObjectURL(dataBlob);
@@ -153,33 +182,48 @@ const FormCompletion = ({ formData, formSchema, originalUrl, onReset }) => {
 
                     {/* Action Buttons */}
                     <div className="space-y-3">
+                        {/* Primary Action Button */}
                         {!submissionResult && (
                             <button
-                                onClick={handleSubmitToWebsite}
-                                disabled={isSubmitting}
+                                onClick={pdfId ? downloadFormData : handleSubmitToWebsite}
+                                disabled={isSubmitting || isDownloading}
                                 className="w-full bg-green-500 hover:bg-green-400 text-black font-bold py-4 px-6 rounded-xl flex items-center justify-center space-x-2 transition-all shadow-[0_0_20px_rgba(34,197,94,0.3)] hover:shadow-[0_0_30px_rgba(34,197,94,0.5)] disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                                {isSubmitting ? (
-                                    <>
-                                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-black"></div>
-                                        <span>Submitting to Website...</span>
-                                    </>
+                                {pdfId ? (
+                                    isDownloading ? (
+                                        <>
+                                            <Loader2 size={20} className="animate-spin text-black" />
+                                            <span>Generating PDF...</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Download size={20} />
+                                            <span>Download Filled PDF</span>
+                                        </>
+                                    )
                                 ) : (
-                                    <>
-                                        <Send size={20} />
-                                        <span>Submit to Original Website</span>
-                                    </>
+                                    isSubmitting ? (
+                                        <>
+                                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-black"></div>
+                                            <span>Submitting to Website...</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Send size={20} />
+                                            <span>Submit to Original Website</span>
+                                        </>
+                                    )
                                 )}
                             </button>
                         )}
 
                         <div className="flex gap-3">
                             <button
-                                onClick={downloadFormData}
+                                onClick={pdfId ? downloadAsJson : downloadFormData}
                                 className="flex-1 bg-white/5 hover:bg-white/10 text-white border border-white/10 font-medium py-3 px-4 rounded-xl flex items-center justify-center space-x-2 transition-all"
                             >
-                                <Download size={18} />
-                                <span>Download</span>
+                                <FileText size={18} />
+                                <span>{pdfId ? 'Download JSON' : 'Download'}</span>
                             </button>
 
                             <button

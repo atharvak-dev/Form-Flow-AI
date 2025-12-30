@@ -201,11 +201,21 @@ def _detect_pdf_type(pdf_path: Union[str, Path, bytes]) -> Tuple[bool, bool]:
         else:
             reader = PdfReader(str(pdf_path))
         
-        # Check for XFA
-        if "/AcroForm" in reader.trailer.get("/Root", {}):
-            acro_form = reader.trailer["/Root"].get("/AcroForm", {})
-            if isinstance(acro_form, DictionaryObject) and "/XFA" in acro_form:
-                is_xfa = True
+        # Check for XFA - need to handle pypdf object types
+        try:
+            root = reader.trailer.get("/Root")
+            if root is not None:
+                # Resolve indirect object if needed
+                if hasattr(root, 'get_object'):
+                    root = root.get_object()
+                if isinstance(root, dict) and "/AcroForm" in root:
+                    acro_form = root.get("/AcroForm")
+                    if hasattr(acro_form, 'get_object'):
+                        acro_form = acro_form.get_object()
+                    if isinstance(acro_form, dict) and "/XFA" in acro_form:
+                        is_xfa = True
+        except Exception as e:
+            logger.debug(f"XFA detection skipped: {e}")
         
         # Check if scanned (no text, just images)
         has_text = False
@@ -216,7 +226,11 @@ def _detect_pdf_type(pdf_path: Union[str, Path, bytes]) -> Tuple[bool, bool]:
                 break
         
         # Check for form fields
-        has_fields = len(reader.get_fields() or {}) > 0
+        try:
+            fields = reader.get_fields()
+            has_fields = len(fields) > 0 if fields else False
+        except Exception:
+            has_fields = False
         
         # If no text and no fields, likely scanned
         is_scanned = not has_text and not has_fields
@@ -393,22 +407,24 @@ def _detect_purpose(field_name: str, label: str) -> Optional[str]:
     
     purpose_patterns = {
         "email": r"e[-_]?mail",
-        "phone": r"(phone|tel|mobile|cell)",
-        "name": r"(^name$|full.?name|your.?name)",
+        # Improved phone pattern to catch "Contact Number" but avoid "Emergency Contact Name"
+        "phone": r"(phone|tel|mobile|cell|contact\s*(number|no\.?|#)|primary\s*contact|alternate\s*contact)",
+        "name": r"(^name$|full.?name|your.?name|applicant.?name|contact.?name)",
         "first_name": r"(first.?name|given.?name|fname)",
         "last_name": r"(last.?name|sur.?name|family.?name|lname)",
-        "address": r"(address|street|addr)",
+        "address": r"(address|street|addr|residence)",
         "city": r"(city|town)",
         "state": r"(state|province)",
-        "zip": r"(zip|postal|post.?code)",
+        "zip": r"(zip|postal|post.?code|pincode)",
         "country": r"country",
-        "date": r"(date|dob|birth)",
-        "ssn": r"(ssn|social.?sec|tax.?id)",
-        "gender": r"(gender|sex)",
-        "company": r"(company|organization|employer)",
-        "title": r"(title|position|job)",
+        "date": r"(date|dob|birth|year|day|month)",
+        "ssn": r"(ssn|social.?sec|tax.?id|pan\s*card|aadhaar)", # Added Indian context (PAN/Aadhaar) generically
+        "gender": r"(gender|sex|male|female)",
+        "company": r"(company|organization|employer|business)",
+        "title": r"(title|position|job|designation)",
         "website": r"(website|url|web)",
         "signature": r"(signature|sign)",
+        "amount": r"(amount|fee|cost|price|total|salary|stipend)",
     }
     
     for purpose, pattern in purpose_patterns.items():
@@ -539,6 +555,167 @@ def _parse_acroform(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
     return fields
 
 
+def _parse_visual_form(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
+    """
+    Parse visual form patterns from text-based PDFs.
+    
+    Detects form fields by looking for patterns like:
+    - "Label: _______________"
+    - "Label: " followed by blank space
+    - "Label (DD/MM/YYYY):" date patterns
+    - Lines ending with colons
+    
+    This is useful for PDFs that don't have AcroForm fields but
+    have visual form layouts.
+    """
+    fields = []
+    
+    try:
+        if isinstance(pdf_path, bytes):
+            plumber_pdf = pdfplumber.open(io.BytesIO(pdf_path))
+        else:
+            plumber_pdf = pdfplumber.open(str(pdf_path))
+        
+        # Generalized structural patterns that indicate form fields
+        # These patterns focus on the SHAPE of the field, not the keywords
+        field_patterns = [
+            # 1. Strongest Signal: "Label: [Underscores]"
+            # Example: "Full Name: ___________"
+            (r'^(.+?):\s*_{2,}\s*$', 'text'),
+            
+            # 2. Format Hint Signal: "Label (Hint): [Underscores]"
+            # Example: "Date of Birth (DD/MM/YYYY): ______"
+            (r'^(.+?)\s*\([^)]+\):\s*_{2,}\s*$', 'text'),
+            
+            # 3. Colon + Empty Space Signal: "Label: [End of Line or Space]"
+            # Example: "Address: " (where user writes next to it)
+            # We enforce a min text length to avoid random colons
+            (r'^([A-Za-z][A-Za-z\s&/-]{2,50}):\s*$', 'text'),
+            
+            # 4. Implicit Field Signal: "Label [Underscores]" (No colon)
+            # Example: "Signature ________________"
+            (r'^([A-Za-z][A-Za-z\s]{2,50})\s+_{3,}\s*$', 'text'),
+            
+            # 5. Dotted Leader Signal: "Label ..............."
+            (r'^(.+?)\s*\.{4,}\s*$', 'text'),
+        ]
+        
+        field_id = 0
+        seen_labels = set()  # Avoid duplicates
+        
+        for page_num, page in enumerate(plumber_pdf.pages):
+            text = page.extract_text() or ""
+            lines = text.split('\n')
+            
+            for line_idx, line in enumerate(lines):
+                line = line.strip()
+                if not line or len(line) < 3:
+                    continue
+                
+                # Skip headers/titles (all caps OR very short)
+                # But be careful: "FULL NAME" might be a valid label
+                # So we only skip if it DOESN'T match a field pattern
+                
+                matched = False
+                for pattern, _ in field_patterns:
+                    match = re.match(pattern, line, re.IGNORECASE)
+                    if match:
+                        label = match.group(1).strip()
+                        
+                        # Clean up label (remove dots, extraneous chars)
+                        label = re.sub(r'\s+', ' ', label)
+                        label = label.rstrip(':').strip()
+                        label = label.rstrip('.').strip() 
+                        
+                        # Validation: Label should be reasonable length
+                        if len(label) < 2 or len(label) > 80:
+                            continue
+                        
+                        # Validation: Label shouldn't constitute a full sentence usually
+                        if len(label.split()) > 10:
+                            continue
+                            
+                        # Validation: Avoid duplicate labels (case-insensitive)
+                        if label.lower() in seen_labels:
+                            continue
+                        
+                        # Semantic Skip List (Strictly non-fields)
+                        # Only skip obvious document structure items
+                        skip_patterns = [
+                            'page of', 'page :', 'terms and conditions', 'instructions:', 
+                            'form no', 'version:', 'revised:', 'office use only',
+                            'please print', 'signature of', 'date:', 'place:' 
+                            # Note: "date" is tricky, it IS a field usually. 
+                            # "Date:" alone at the top is often metadata, but in a form it's a field.
+                            # We'll allow "Date" generally if it looks like a form field.
+                        ]
+                        
+                        # Refined skip check: exact words or start of line
+                        is_skip = False
+                        for sp in skip_patterns:
+                            if label.lower() == sp or label.lower().startswith(sp):
+                                is_skip = True
+                                break
+                        if is_skip:
+                            continue
+                        
+                        seen_labels.add(label.lower())
+                        field_id += 1
+                        
+                        # --- SEMANTIC TYPE INFERENCE ---
+                        # Determine field type based on the content of the label
+                        detected_type = 'text'
+                        purpose = _detect_purpose(label, "")
+                        
+                        if purpose:
+                            if purpose in ['email']:
+                                detected_type = 'email'
+                            elif purpose in ['phone', 'mobile']:
+                                detected_type = 'phone'
+                            elif purpose in ['date', 'dob']:
+                                detected_type = 'date'
+                            elif purpose in ['number', 'zip', 'postal', 'amount', 'salary']:
+                                detected_type = 'number'
+                        
+                        # Detect signature explicitly
+                        if 'signature' in label.lower():
+                            detected_type = 'signature'
+                            
+                        matched = True
+                        
+                        # Create field
+                        field = PdfField(
+                            id=f"visual_field_{field_id}",
+                            name=f"field_{field_id}_{label.lower().replace(' ', '_')[:30]}",
+                            field_type=FieldType(detected_type) if detected_type in [e.value for e in FieldType] else FieldType.TEXT,
+                            label=label,
+                            position=FieldPosition(
+                                page=page_num,
+                                x=50,  # Approximate
+                                y=line_idx * 20,  # Approximate
+                                width=400,
+                                height=20,
+                            ),
+                            constraints=FieldConstraints(),
+                            display_name=label.title(),
+                            purpose=purpose,
+                        )
+                        fields.append(field)
+                        break  # Stop checking patterns for this line
+                
+                if matched:
+                    continue
+
+        
+        plumber_pdf.close()
+        logger.info(f"Visual form parsing found {len(fields)} fields")
+        
+    except Exception as e:
+        logger.error(f"Error parsing visual form: {e}")
+    
+    return fields
+
+
 def _parse_scanned_pdf(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
     """
     Parse scanned PDF using OCR to detect form fields.
@@ -645,16 +822,22 @@ def parse_pdf(
     # Extract metadata
     metadata = {}
     if extract_metadata:
-        md = reader.metadata or {}
-        metadata = {
-            "title": md.get("/Title", ""),
-            "author": md.get("/Author", ""),
-            "creator": md.get("/Creator", ""),
-            "producer": md.get("/Producer", ""),
-        }
+        try:
+            md = reader.metadata
+            if md:
+                # pypdf metadata is accessed via attributes, not dict keys
+                metadata = {
+                    "title": getattr(md, 'title', '') or '',
+                    "author": getattr(md, 'author', '') or '',
+                    "creator": getattr(md, 'creator', '') or '',
+                    "producer": getattr(md, 'producer', '') or '',
+                }
+        except Exception as e:
+            logger.debug(f"Could not extract metadata: {e}")
     
     # Parse fields
     fields = []
+    is_visual_form = False
     
     if is_scanned and use_ocr:
         fields = _parse_scanned_pdf(pdf_source)
@@ -666,13 +849,21 @@ def parse_pdf(
     else:
         fields = _parse_acroform(pdf_source)
     
+    # Fallback: Try visual form parsing if no AcroForm fields found
+    if not fields:
+        logger.info("No AcroForm fields found, attempting visual form pattern detection...")
+        fields = _parse_visual_form(pdf_source)
+        is_visual_form = len(fields) > 0
+        if is_visual_form:
+            logger.info(f"Visual form parsing successful: found {len(fields)} fields")
+    
     return PdfFormSchema(
         file_path=file_path,
         file_name=file_name,
         total_pages=total_pages,
         fields=fields,
         is_xfa=is_xfa,
-        is_scanned=is_scanned,
+        is_scanned=is_scanned or is_visual_form,  # Treat visual forms similarly
         metadata=metadata,
     )
 

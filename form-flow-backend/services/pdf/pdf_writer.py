@@ -155,32 +155,34 @@ class PdfFormWriter:
             
             writer = PdfWriter()
             
-            # Copy pages
-            for page in reader.pages:
-                writer.add_page(page)
-            
             # Get form fields
             fields = reader.get_fields() or {}
             
             if not fields:
-                result.warnings.append("No form fields found in PDF")
-                # Could still try overlay method here
+                result.warnings.append("No AcroForm fields found. Attempting visual filling.")
+                # Try visual overlay filling (modifies reader pages in-place)
+                self._fill_overlay(reader, writer, data, result)
             
-            # Fill each field
-            for field_name, value in data.items():
-                field_result = self._fill_field(
-                    writer=writer,
-                    field_name=field_name,
-                    value=value,
-                    fields=fields,
-                    fit_text=fit_text,
-                )
-                result.field_results.append(field_result)
-                
-                if not field_result.success:
-                    result.warnings.append(
-                        f"Field '{field_name}': {field_result.error}"
+            # Add pages to writer (now that they might be modified)
+            for page in reader.pages:
+                writer.add_page(page)
+
+            if fields:
+                # Fill each AcroForm field
+                for field_name, value in data.items():
+                    field_result = self._fill_field(
+                        writer=writer,
+                        field_name=field_name,
+                        value=value,
+                        fields=fields,
+                        fit_text=fit_text,
                     )
+                    result.field_results.append(field_result)
+                    
+                    if not field_result.success:
+                        result.warnings.append(
+                            f"Field '{field_name}': {field_result.error}"
+                        )
             
             # Flatten if requested
             if flatten:
@@ -219,6 +221,108 @@ class PdfFormWriter:
             result.errors.append(str(e))
         
         return result
+
+    def _fill_overlay(
+        self,
+        reader: PdfReader,
+        writer: PdfWriter,
+        data: Dict[str, str],
+        result: FilledPdf,
+    ):
+        """Fill visual form by overlaying text."""
+        import traceback
+        if not REPORTLAB_AVAILABLE:
+            result.warnings.append("ReportLab required for visual form filling")
+            return
+
+        try:
+            logger.info("Starting visual overlay fill...")
+            
+            # Re-parse to get field coordinates
+            from .pdf_parser import parse_pdf
+            
+            # Create a bytes buffer from the reader content for parsing
+            pdf_bytes_io = io.BytesIO()
+            tmp_writer = PdfWriter()
+            for page in reader.pages:
+                tmp_writer.add_page(page)
+            tmp_writer.write(pdf_bytes_io)
+            pdf_bytes = pdf_bytes_io.getvalue()
+            
+            logger.info("Re-parsing PDF for visual structure...")
+            schema = parse_pdf(pdf_bytes, use_ocr=False)
+            logger.info(f"Visual parser found {len(schema.fields)} fields")
+            
+            filled_fields = 0
+            
+            # Create overlay for specific pages
+            for i, page in enumerate(reader.pages):
+                # Check for matching fields on this page first to avoid empty work
+                page_fields = [f for f in schema.fields if f.position.page == i]
+                if not page_fields:
+                    continue
+                    
+                packet = io.BytesIO()
+                can = canvas.Canvas(packet, pagesize=(
+                    float(page.mediabox.width), 
+                    float(page.mediabox.height)
+                ))
+                
+                logger.info(f"Processing Page {i+1} with {len(page_fields)} fields")
+                
+                has_content = False
+                for field in page_fields:
+                    val = data.get(field.display_name) or data.get(field.name) or data.get(field.label) or data.get(field.name.split('_')[-1])
+                    
+                    # Fuzzy match data keys to field names
+                    if not val:
+                        field_clean = field.label.lower().replace(':', '').strip()
+                        for k, v in data.items():
+                            if k.lower().replace(':', '').strip() == field_clean:
+                                val = v
+                                break
+
+                    if val:
+                        # Convert top-left (pdfplumber) to bottom-left (reportlab)
+                        x = field.position.x
+                        # Field Y in parser is from top. ReportLab needs from bottom.
+                        y = float(page.mediabox.height) - field.position.y - field.position.height + 5 # Small adjustment
+                        
+                        try:
+                            can.setFont("Helvetica", 10)
+                            can.drawString(x + 5, y, str(val)) # Add small x offset
+                            has_content = True
+                            
+                            result.field_results.append(FieldFillResult(
+                                field_name=field.name,
+                                success=True,
+                                original_value=val,
+                                filled_value=val
+                            ))
+                            filled_fields += 1
+                        except Exception as e:
+                             logger.error(f"Error drawing string for field {field.name}: {e}")
+                
+                can.save()
+                
+                if has_content:
+                    # Merge overlay
+                    packet.seek(0)
+                    overlay_pdf = PdfReader(packet)
+                    if len(overlay_pdf.pages) > 0:
+                        page.merge_page(overlay_pdf.pages[0])
+                        logger.info(f"Merged overlay onto Page {i+1}")
+            
+            if filled_fields == 0:
+                result.warnings.append("No matching fields found for visual filling")
+                logger.warning("Visual filling completed but no fields were filled.")
+            else:
+                logger.info(f"Visual filling completed. Filled {filled_fields} fields.")
+                
+        except Exception as e:
+            logger.error(f"Error in overlay fill: {e}")
+            logger.error(traceback.format_exc())
+            result.warnings.append(f"Visual filling failed: {e}")
     
     def _fill_field(
         self,

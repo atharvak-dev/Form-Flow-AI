@@ -54,8 +54,17 @@ const HomePage = () => {
                 throw new Error(response.message || 'Failed to parse document');
             }
 
+            // Check if PDF has fillable fields
+            if (!response.fields || response.fields.length === 0) {
+                throw new Error(
+                    'This PDF has no fillable form fields. It appears to be a static document. ' +
+                    'Form Flow AI works with interactive PDF forms that have text boxes, checkboxes, or dropdowns.'
+                );
+            }
+
             // Convert PDF schema to form filler compatible format
-            const formSchema = response.fields.map(field => ({
+            // VoiceFormFiller expects formSchema as array of form groups: [{fields: [...]}]
+            const fields = response.fields.map(field => ({
                 name: field.name || field.id,
                 id: field.id || field.name,
                 type: field.type || 'text',
@@ -68,8 +77,9 @@ const HomePage = () => {
             }));
 
             // Set result in the same format as web form scraping
+            // Wrap fields in array with 'fields' property to match expected structure
             setResult({
-                form_schema: formSchema,
+                form_schema: [{ fields: fields }],
                 form_context: {
                     source: 'pdf',
                     fileName: response.file_name,

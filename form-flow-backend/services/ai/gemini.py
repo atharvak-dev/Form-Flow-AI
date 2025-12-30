@@ -73,10 +73,10 @@ class GeminiService:
     
     Attributes:
         llm: ChatGoogleGenerativeAI instance
-        model: Model name (default: gemini-1.5-flash)
+        model: Model name (default: gemini-2.0-flash)
     """
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-1.5-flash"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-2.0-flash"):
         """
         Initialize Gemini service with LangChain.
         

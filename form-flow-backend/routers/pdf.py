@@ -13,6 +13,7 @@ Integrates with existing conversation agent for voice-powered filling.
 import logging
 import tempfile
 import os
+import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, File, UploadFile, HTTPException, BackgroundTasks
@@ -114,6 +115,7 @@ async def upload_pdf(
     # Read file content
     try:
         content = await file.read()
+        logger.info(f"Read PDF file: {file.filename}, size: {len(content)} bytes")
     except Exception as e:
         logger.error(f"Error reading uploaded file: {e}")
         raise HTTPException(
@@ -123,14 +125,18 @@ async def upload_pdf(
     
     # Parse PDF
     try:
+        logger.info(f"Parsing PDF: {file.filename}")
         schema = parse_pdf(content)
+        logger.info(f"Parsed {schema.total_fields} fields from {file.filename}")
     except ImportError as e:
+        logger.error(f"Import error: {e}")
         raise HTTPException(
             status_code=500,
             detail="PDF parsing libraries not installed. Run: pip install pdfplumber pypdf"
         )
     except Exception as e:
         logger.error(f"Error parsing PDF: {e}")
+        logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=400,
             detail=f"Error parsing PDF: {str(e)}"
@@ -139,10 +145,20 @@ async def upload_pdf(
     # Generate ID and store
     pdf_id = str(uuid.uuid4())
     _pdf_storage[pdf_id] = content
-    _pdf_metadata[pdf_id] = {
-        "file_name": file.filename,
-        "schema": schema.to_dict(),
-    }
+    
+    try:
+        schema_dict = schema.to_dict()
+        _pdf_metadata[pdf_id] = {
+            "file_name": file.filename,
+            "schema": schema_dict,
+        }
+    except Exception as e:
+        logger.error(f"Error converting schema to dict: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing PDF schema: {str(e)}"
+        )
     
     # Schedule cleanup after 1 hour
     if background_tasks:
@@ -278,6 +294,7 @@ async def fill_pdf_endpoint(
         )
     except Exception as e:
         logger.error(f"Error filling PDF: {e}")
+        logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=500,
             detail=f"Error filling PDF: {str(e)}"
