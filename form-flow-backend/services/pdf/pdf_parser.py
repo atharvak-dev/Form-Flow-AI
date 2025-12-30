@@ -567,6 +567,7 @@ def _parse_visual_form(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
     
     This is useful for PDFs that don't have AcroForm fields but
     have visual form layouts.
+    Uses precise coordinate extraction via pdfplumber.extract_words().
     """
     fields = []
     
@@ -577,113 +578,122 @@ def _parse_visual_form(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
             plumber_pdf = pdfplumber.open(str(pdf_path))
         
         # Generalized structural patterns that indicate form fields
-        # These patterns focus on the SHAPE of the field, not the keywords
         field_patterns = [
-            # 1. Strongest Signal: "Label: [Underscores]"
-            # Example: "Full Name: ___________"
-            (r'^(.+?):\s*_{2,}\s*$', 'text'),
-            
-            # 2. Format Hint Signal: "Label (Hint): [Underscores]"
-            # Example: "Date of Birth (DD/MM/YYYY): ______"
-            (r'^(.+?)\s*\([^)]+\):\s*_{2,}\s*$', 'text'),
-            
-            # 3. Colon + Empty Space Signal: "Label: [End of Line or Space]"
-            # Example: "Address: " (where user writes next to it)
-            # We enforce a min text length to avoid random colons
-            (r'^([A-Za-z][A-Za-z\s&/-]{2,50}):\s*$', 'text'),
-            
-            # 4. Implicit Field Signal: "Label [Underscores]" (No colon)
-            # Example: "Signature ________________"
-            (r'^([A-Za-z][A-Za-z\s]{2,50})\s+_{3,}\s*$', 'text'),
-            
-            # 5. Dotted Leader Signal: "Label ..............."
-            (r'^(.+?)\s*\.{4,}\s*$', 'text'),
+            (r'^(.+?):\s*_{2,}\s*$', 'text'), # "Label: ____"
+            (r'^(.+?)\s*\([^)]+\):\s*_{2,}\s*$', 'text'), # "Label (Hint): ____"
+            (r'^([A-Za-z][A-Za-z\s&/-]{2,50}):\s*$', 'text'), # "Label: "
+            (r'^([A-Za-z][A-Za-z\s]{2,50})\s+_{3,}\s*$', 'text'), # "Label ____"
+            (r'^(.+?)\s*\.{4,}\s*$', 'text'), # "Label ...."
         ]
         
         field_id = 0
-        seen_labels = set()  # Avoid duplicates
+        seen_labels = set()
+        
+        logger.info("Using coordinate-aware visual parsing.")
         
         for page_num, page in enumerate(plumber_pdf.pages):
-            text = page.extract_text() or ""
-            lines = text.split('\n')
+            # Extract words with coordinates
+            words = page.extract_words(x_tolerance=3, y_tolerance=3)
+            if not words:
+                continue
             
-            for line_idx, line in enumerate(lines):
-                line = line.strip()
-                if not line or len(line) < 3:
-                    continue
+            # Group words into lines based on Y-coordinate (top)
+            # 1. Sort by top, then x
+            words.sort(key=lambda w: (float(w['top']), float(w['x0'])))
+            
+            lines = []
+            if words:
+                current_line = [words[0]]
+                last_top = float(words[0]['top'])
                 
-                # Skip headers/titles (all caps OR very short)
-                # But be careful: "FULL NAME" might be a valid label
-                # So we only skip if it DOESN'T match a field pattern
+                for word in words[1:]:
+                    word_top = float(word['top'])
+                    # If words are roughly on same line (within 4px)
+                    if abs(word_top - last_top) < 4:
+                        current_line.append(word)
+                    else:
+                        lines.append(current_line)
+                        current_line = [word]
+                        last_top = word_top
+                lines.append(current_line)
+            
+            page_height = float(page.height)
+
+            for line_words in lines:
+                # Reconstruct text line
+                line_text = " ".join([w['text'] for w in line_words])
                 
                 matched = False
                 for pattern, _ in field_patterns:
-                    match = re.match(pattern, line, re.IGNORECASE)
+                    match = re.match(pattern, line_text, re.IGNORECASE)
                     if match:
                         label = match.group(1).strip()
                         
-                        # Clean up label (remove dots, extraneous chars)
+                        # Cleanup Label
                         label = re.sub(r'\s+', ' ', label)
                         label = label.rstrip(':').strip()
-                        label = label.rstrip('.').strip() 
+                        label = label.rstrip('.').strip()
                         
-                        # Validation: Label should be reasonable length
-                        if len(label) < 2 or len(label) > 80:
-                            continue
+                        # Basic Validations
+                        if len(label) < 2 or len(label) > 80: continue
+                        if len(label.split()) > 10: continue
+                        if label.lower() in seen_labels: continue
                         
-                        # Validation: Label shouldn't constitute a full sentence usually
-                        if len(label.split()) > 10:
-                            continue
-                            
-                        # Validation: Avoid duplicate labels (case-insensitive)
-                        if label.lower() in seen_labels:
-                            continue
-                        
-                        # Semantic Skip List (Strictly non-fields)
-                        # Only skip obvious document structure items
+                        # Skip Patterns
                         skip_patterns = [
                             'page of', 'page :', 'terms and conditions', 'instructions:', 
                             'form no', 'version:', 'revised:', 'office use only',
                             'please print', 'signature of', 'date:', 'place:' 
-                            # Note: "date" is tricky, it IS a field usually. 
-                            # "Date:" alone at the top is often metadata, but in a form it's a field.
-                            # We'll allow "Date" generally if it looks like a form field.
                         ]
-                        
-                        # Refined skip check: exact words or start of line
                         is_skip = False
                         for sp in skip_patterns:
                             if label.lower() == sp or label.lower().startswith(sp):
-                                is_skip = True
-                                break
-                        if is_skip:
-                            continue
+                                is_skip = True; break
+                        if is_skip: continue
                         
                         seen_labels.add(label.lower())
                         field_id += 1
                         
-                        # --- SEMANTIC TYPE INFERENCE ---
-                        # Determine field type based on the content of the label
-                        detected_type = 'text'
+                        # Purpose Inference
                         purpose = _detect_purpose(label, "")
+                        detected_type = 'text'
+                        if purpose in ['email']: detected_type = 'email'
+                        elif purpose in ['phone', 'mobile']: detected_type = 'phone'
+                        elif purpose in ['date', 'dob']: detected_type = 'date'
+                        elif purpose in ['number', 'zip', 'postal', 'amount', 'salary']: detected_type = 'number'
+                        if 'signature' in label.lower(): detected_type = 'signature'
+
+                        # --- COORDINATE CALCULATION ---
+                        # Y: Store Top-Down coordinate (distance from top)
+                        # We use avg_top for consistency with OCR parser and pdf_writer expectation
+                        avg_top = float(sum(float(w['top']) for w in line_words) / len(line_words))
+                        pdf_y = avg_top
                         
-                        if purpose:
-                            if purpose in ['email']:
-                                detected_type = 'email'
-                            elif purpose in ['phone', 'mobile']:
-                                detected_type = 'phone'
-                            elif purpose in ['date', 'dob']:
-                                detected_type = 'date'
-                            elif purpose in ['number', 'zip', 'postal', 'amount', 'salary']:
-                                detected_type = 'number'
+                        # X: Try to find start of input area.
+                        # Strategy: 
+                        # 1. If line has underscores, start at first underscore.
+                        # 2. If line has colon, start after colon.
+                        # 3. Else default to right of label text approx.
                         
-                        # Detect signature explicitly
-                        if 'signature' in label.lower():
-                            detected_type = 'signature'
-                            
-                        matched = True
+                        start_x = 150.0 # Default fallback
                         
-                        # Create field
+                        underscore_word = next((w for w in line_words if '_' in w['text']), None)
+                        colon_word = next((w for w in reversed(line_words) if ':' in w['text']), None)
+                        
+                        if underscore_word:
+                             start_x = float(underscore_word['x0'])
+                        elif colon_word:
+                             start_x = float(colon_word['x1']) + 5
+                        else:
+                             # Just use end of last word + gap?
+                             # Or fixed offset if short label?
+                             start_x = float(line_words[-1]['x1']) + 5
+                        
+                        # Ensure X is not too far right
+                        if start_x > 400: start_x = 400
+                        
+                        logger.info(f"Field '{label}' detected at Page {page_num+1} Y={pdf_y:.2f} X={start_x:.2f}")
+
                         field = PdfField(
                             id=f"visual_field_{field_id}",
                             name=f"field_{field_id}_{label.lower().replace(' ', '_')[:30]}",
@@ -691,9 +701,9 @@ def _parse_visual_form(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
                             label=label,
                             position=FieldPosition(
                                 page=page_num,
-                                x=50,  # Approximate
-                                y=line_idx * 20,  # Approximate
-                                width=400,
+                                x=start_x,
+                                y=pdf_y, # Exact Y coordinate
+                                width=300,
                                 height=20,
                             ),
                             constraints=FieldConstraints(),
@@ -701,19 +711,22 @@ def _parse_visual_form(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
                             purpose=purpose,
                         )
                         fields.append(field)
-                        break  # Stop checking patterns for this line
+                        matched = True
+                        break # Stop patterns for this line
                 
-                if matched:
-                    continue
+                if matched: continue # Next line
 
-        
         plumber_pdf.close()
         logger.info(f"Visual form parsing found {len(fields)} fields")
         
     except Exception as e:
         logger.error(f"Error parsing visual form: {e}")
+        # traceback.print_exc()
     
     return fields
+
+        
+
 
 
 def _parse_scanned_pdf(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:

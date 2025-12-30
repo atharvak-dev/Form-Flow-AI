@@ -11,11 +11,12 @@ Integrates with existing conversation agent for voice-powered filling.
 """
 
 import logging
+import asyncio
 import tempfile
 import os
 import traceback
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from fastapi import APIRouter, File, UploadFile, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -71,24 +72,78 @@ class PreviewFillRequest(BaseModel):
 
 
 # =============================================================================
-# In-Memory Storage (Replace with Redis/DB in production)
+# Persistent Disk Storage
 # =============================================================================
 
-# Store uploaded PDFs temporarily
-_pdf_storage: Dict[str, bytes] = {}
-_pdf_metadata: Dict[str, Dict[str, Any]] = {}
-_filled_pdfs: Dict[str, bytes] = {}
+STORAGE_DIR = Path("storage")
+UPLOAD_DIR = STORAGE_DIR / "uploads"
+FILLED_DIR = STORAGE_DIR / "filled"
 
+# Ensure directories exist
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+FILLED_DIR.mkdir(parents=True, exist_ok=True)
 
-def _cleanup_pdf(pdf_id: str):
+def _save_upload(pdf_id: str, content: bytes, metadata: Dict[str, Any]):
+    """Save uploaded PDF and metadata to disk."""
+    logger.info(f"💾 SAVING upload {pdf_id} to {UPLOAD_DIR}")
+    # Save PDF
+    pdf_path = UPLOAD_DIR / f"{pdf_id}.pdf"
+    pdf_path.write_bytes(content)
+    
+    # Save Metadata
+    meta_path = UPLOAD_DIR / f"{pdf_id}.json"
+    import json
+    with open(meta_path, "w") as f:
+        json.dump(metadata, f)
+
+def _get_upload(pdf_id: str) -> Optional[Tuple[bytes, Dict[str, Any]]]:
+    """Retrieve uploaded PDF and metadata from disk."""
+    logger.info(f"🔍 SEARCHING for upload {pdf_id} in {UPLOAD_DIR}")
+    pdf_path = UPLOAD_DIR / f"{pdf_id}.pdf"
+    meta_path = UPLOAD_DIR / f"{pdf_id}.json"
+    
+    if not pdf_path.exists() or not meta_path.exists():
+        logger.warning(f"❌ Upload {pdf_id} NOT FOUND at {pdf_path}")
+        return None
+        
+    content = pdf_path.read_bytes()
+    import json
+    with open(meta_path, "r") as f:
+        metadata = json.load(f)
+        
+    return content, metadata
+
+def _save_filled(download_id: str, content: bytes):
+    """Save filled PDF to disk."""
+    path = FILLED_DIR / f"{download_id}.pdf"
+    path.write_bytes(content)
+
+def _get_filled(download_id: str) -> Optional[bytes]:
+    """Retrieve filled PDF from disk."""
+    path = FILLED_DIR / f"{download_id}.pdf"
+    if not path.exists():
+        return None
+    return path.read_bytes()
+
+async def _cleanup_pdf(pdf_id: str):
     """Remove PDF from storage after timeout."""
-    _pdf_storage.pop(pdf_id, None)
-    _pdf_metadata.pop(pdf_id, None)
+    await asyncio.sleep(3600)  # 1 hour delay
+    try:
+        logger.info(f"🧹 Cleaning up upload {pdf_id}")
+        (UPLOAD_DIR / f"{pdf_id}.pdf").unlink(missing_ok=True)
+        (UPLOAD_DIR / f"{pdf_id}.json").unlink(missing_ok=True)
+    except Exception as e:
+        logger.warning(f"Cleanup failed for {pdf_id}: {e}")
 
 
-def _cleanup_filled(download_id: str):
+async def _cleanup_filled(download_id: str):
     """Remove filled PDF after timeout."""
-    _filled_pdfs.pop(download_id, None)
+    await asyncio.sleep(1800)  # 30 mins delay
+    try:
+        logger.info(f"🧹 Cleaning up download {download_id}")
+        (FILLED_DIR / f"{download_id}.pdf").unlink(missing_ok=True)
+    except Exception as e:
+        logger.warning(f"Cleanup filled failed for {download_id}: {e}")
 
 
 # =============================================================================
@@ -144,14 +199,13 @@ async def upload_pdf(
     
     # Generate ID and store
     pdf_id = str(uuid.uuid4())
-    _pdf_storage[pdf_id] = content
     
     try:
         schema_dict = schema.to_dict()
-        _pdf_metadata[pdf_id] = {
+        _save_upload(pdf_id, content, {
             "file_name": file.filename,
             "schema": schema_dict,
-        }
+        })
     except Exception as e:
         logger.error(f"Error converting schema to dict: {e}")
         logger.error(traceback.format_exc())
@@ -162,9 +216,7 @@ async def upload_pdf(
     
     # Schedule cleanup after 1 hour
     if background_tasks:
-        background_tasks.add_task(
-            lambda: _cleanup_pdf(pdf_id),
-        )
+        background_tasks.add_task(_cleanup_pdf, pdf_id)
     
     # Format fields for response
     fields = [f.to_dict() for f in schema.fields]
@@ -188,13 +240,14 @@ async def get_pdf_schema(pdf_id: str):
     
     Returns field information in format compatible with conversation agent.
     """
-    if pdf_id not in _pdf_metadata:
+    upload_data = _get_upload(pdf_id)
+    if not upload_data:
         raise HTTPException(
             status_code=404,
             detail="PDF not found. Upload again."
         )
     
-    metadata = _pdf_metadata[pdf_id]
+    _, metadata = upload_data
     schema = metadata["schema"]
     
     # Convert to conversation-agent compatible format
@@ -227,19 +280,17 @@ async def preview_fill(request: PreviewFillRequest):
     
     Shows text fitting results without creating actual PDF.
     """
-    if request.pdf_id not in _pdf_storage:
+    upload_data = _get_upload(request.pdf_id)
+    if not upload_data:
         raise HTTPException(
             status_code=404,
             detail="PDF not found. Upload again."
         )
     
-    pdf_bytes = _pdf_storage[request.pdf_id]
-    fitter = TextFitter()
-    
-    # Get schema
-    metadata = _pdf_metadata[request.pdf_id]
+    pdf_bytes, metadata = upload_data
     fields_dict = {f["name"]: f for f in metadata["schema"]["fields"]}
     
+    fitter = TextFitter()
     preview = {}
     for field_name, value in request.data.items():
         field_info = fields_dict.get(field_name, {})
@@ -278,13 +329,14 @@ async def fill_pdf_endpoint(
     
     Returns download ID for retrieving filled PDF.
     """
-    if request.pdf_id not in _pdf_storage:
+    upload_data = _get_upload(request.pdf_id)
+    if not upload_data:
         raise HTTPException(
             status_code=404,
             detail="PDF not found. Upload again."
         )
     
-    pdf_bytes = _pdf_storage[request.pdf_id]
+    pdf_bytes, _ = upload_data
     
     try:
         result = fill_pdf(
@@ -308,10 +360,10 @@ async def fill_pdf_endpoint(
     
     # Store filled PDF
     download_id = str(uuid.uuid4())
-    _filled_pdfs[download_id] = result.output_bytes
+    _save_filled(download_id, result.output_bytes)
     
     # Cleanup after 30 minutes
-    background_tasks.add_task(lambda: _cleanup_filled(download_id))
+    background_tasks.add_task(_cleanup_filled, download_id)
     
     # Build preview from results
     preview = {}
@@ -332,6 +384,26 @@ async def fill_pdf_endpoint(
     )
 
 
+@router.get("/debug/files")
+async def debug_pdf_storage():
+    """Debug endpoint to check stored files."""
+    try:
+        uploads = [f.name for f in UPLOAD_DIR.glob("*") if f.is_file()]
+        filled = [f.name for f in FILLED_DIR.glob("*") if f.is_file()]
+        
+        return {
+            "status": "ok",
+            "cwd": str(Path.cwd()),
+            "storage_dir": str(STORAGE_DIR.absolute()),
+            "uploads_count": len(uploads),
+            "uploads": uploads,
+            "filled_count": len(filled),
+            "filled": filled,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @router.get("/download/{download_id}")
 async def download_filled_pdf(download_id: str):
     """
@@ -339,13 +411,12 @@ async def download_filled_pdf(download_id: str):
     
     The download_id is returned from the /fill endpoint.
     """
-    if download_id not in _filled_pdfs:
+    pdf_bytes = _get_filled(download_id)
+    if not pdf_bytes:
         raise HTTPException(
             status_code=404,
             detail="Filled PDF not found or expired. Fill again."
         )
-    
-    pdf_bytes = _filled_pdfs[download_id]
     
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
@@ -365,13 +436,13 @@ async def cleanup_pdf(pdf_id: str):
     """
     removed = False
     
-    if pdf_id in _pdf_storage:
-        del _pdf_storage[pdf_id]
+    # Clean up disk files
+    try:
+        (UPLOAD_DIR / f"{pdf_id}.pdf").unlink(missing_ok=True)
+        (UPLOAD_DIR / f"{pdf_id}.json").unlink(missing_ok=True)
         removed = True
-    
-    if pdf_id in _pdf_metadata:
-        del _pdf_metadata[pdf_id]
-        removed = True
+    except Exception as e:
+        logger.warning(f"Manual cleanup failed for {pdf_id}: {e}")
     
     return {
         "success": removed,
@@ -404,6 +475,6 @@ async def pdf_health():
         "status": "healthy" if pdf_available else "degraded",
         "pdf_parsing": pdf_available,
         "rag_service": rag_stats,
-        "pdfs_in_memory": len(_pdf_storage),
-        "filled_pdfs_in_memory": len(_filled_pdfs),
+        "uploads_on_disk": len(list(UPLOAD_DIR.glob("*.pdf"))),
+        "filled_on_disk": len(list(FILLED_DIR.glob("*.pdf"))),
     }

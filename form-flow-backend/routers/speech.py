@@ -77,20 +77,16 @@ async def get_field_speech_audio(
             return Response(content=audio_data, media_type="audio/mpeg")
         else:
             log_api_call("ElevenLabs", "text-to-speech", success=False, error="No audio returned")
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to generate speech - no audio returned"
-            )
+            # Return empty response with 204 status to indicate client should use browser TTS
+            return Response(status_code=204)
             
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Speech generation failed for {field_name}: {e}")
         log_api_call("ElevenLabs", "text-to-speech", success=False, error=str(e))
-        raise HTTPException(
-            status_code=500,
-            detail=f"Speech generation failed: {str(e)}"
-        )
+        # Return 204 to indicate client should use browser TTS fallback
+        return Response(status_code=204)
 
 
 # =============================================================================

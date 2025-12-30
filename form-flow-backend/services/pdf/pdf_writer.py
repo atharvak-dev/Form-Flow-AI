@@ -277,9 +277,21 @@ class PdfFormWriter:
                     # Fuzzy match data keys to field names
                     if not val:
                         field_clean = field.label.lower().replace(':', '').strip()
+                        field_name_clean = field.name.lower().replace('_', ' ').strip()
+                        display_clean = field.display_name.lower().replace(':', '').strip() if field.display_name else ""
+                        
                         for k, v in data.items():
-                            if k.lower().replace(':', '').strip() == field_clean:
+                            k_clean = k.lower().replace('_', ' ').replace(':', '').strip()
+                            # Try multiple matching strategies
+                            if (k_clean == field_clean or 
+                                k_clean == field_name_clean or
+                                k_clean == display_clean or
+                                k_clean in field_clean or 
+                                field_clean in k_clean or
+                                k_clean in display_clean or
+                                display_clean in k_clean):
                                 val = v
+                                logger.info(f"Fuzzy matched '{k}' -> '{field.name}' (via '{field_clean}')") 
                                 break
 
                     if val:
