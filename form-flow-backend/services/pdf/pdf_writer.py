@@ -18,8 +18,16 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 import tempfile
 import shutil
+import re
+import difflib
+from datetime import datetime
 
-logger = logging.getLogger(__name__)
+# Enterprise Infrastructure
+from .exceptions import PdfFillingError, PdfResourceError
+from .utils import get_logger, benchmark, PerformanceTimer
+from .text_fitter import TextFitter, FitResult
+
+logger = get_logger(__name__)
 
 # PDF Libraries
 try:
@@ -43,8 +51,6 @@ try:
 except ImportError:
     REPORTLAB_AVAILABLE = False
     canvas = None
-
-from .text_fitter import TextFitter, FitResult
 
 
 # =============================================================================
@@ -89,6 +95,56 @@ class FilledPdf:
         return sum(1 for r in self.field_results if not r.success)
 
 
+class ValueTransformer:
+    """
+    Transforms and formats values based on field purpose/type.
+    """
+    
+    @staticmethod
+    def transform(value: str, purpose: Optional[str] = None) -> str:
+        if not value or not purpose:
+            return value
+            
+        purpose = purpose.lower()
+        
+        if purpose == "phone":
+            return ValueTransformer._format_phone(value)
+        elif purpose == "date":
+            return ValueTransformer._format_date(value)
+        elif purpose == "ssn":
+            return ValueTransformer._format_ssn(value)
+            
+        return value
+
+    @staticmethod
+    def _format_phone(value: str) -> str:
+        # Standardize to (XXX) XXX-XXXX if 10 digits
+        digits = re.sub(r'\D', '', value)
+        if len(digits) == 10:
+            return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+        return value
+
+    @staticmethod
+    def _format_date(value: str) -> str:
+        # Try to standardize to MM/DD/YYYY
+        # This assumes input might be YYYY-MM-DD or other standard formats
+        if re.match(r'^\d{4}-\d{2}-\d{2}$', value):
+            try:
+                dt = datetime.strptime(value, "%Y-%m-%d")
+                return dt.strftime("%m/%d/%Y")
+            except ValueError:
+                pass
+        return value
+
+    @staticmethod
+    def _format_ssn(value: str) -> str:
+        # Standardize to XXX-XX-XXXX
+        digits = re.sub(r'\D', '', value)
+        if len(digits) == 9:
+            return f"{digits[:3]}-{digits[3:5]}-{digits[5:]}"
+        return value
+
+
 # =============================================================================
 # PDF Writer Class
 # =============================================================================
@@ -123,6 +179,8 @@ class PdfFormWriter:
         self.default_font_size = default_font_size
         self.min_font_size = min_font_size
     
+
+    @benchmark("fill_pdf_form")
     def fill(
         self,
         template_path: Union[str, Path, bytes],
@@ -133,16 +191,6 @@ class PdfFormWriter:
     ) -> FilledPdf:
         """
         Fill a PDF form with data.
-        
-        Args:
-            template_path: Path to template PDF or PDF bytes
-            data: Dictionary of {field_name: value}
-            output_path: Path to save filled PDF (None for bytes output)
-            flatten: Whether to flatten form fields (make non-editable)
-            fit_text: Whether to apply text fitting
-            
-        Returns:
-            FilledPdf with results
         """
         result = FilledPdf(success=True)
         
@@ -159,6 +207,7 @@ class PdfFormWriter:
             fields = reader.get_fields() or {}
             
             if not fields:
+                logger.warning("No AcroForm fields found. Attempting visual filling.")
                 result.warnings.append("No AcroForm fields found. Attempting visual filling.")
                 # Try visual overlay filling (modifies reader pages in-place)
                 self._fill_overlay(reader, writer, data, result)
@@ -203,6 +252,7 @@ class PdfFormWriter:
                             else:
                                 del page["/Annots"]
                 except Exception as e:
+                    logger.warning(f"Flattening partially failed: {e}")
                     result.warnings.append(f"Flattening partially failed: {e}")
             
             # Output
@@ -219,8 +269,34 @@ class PdfFormWriter:
             logger.error(f"Error filling PDF: {e}")
             result.success = False
             result.errors.append(str(e))
+            # Raise dedicated error if it's a critical failure that acts as a stopper
+            # But here we want to return the result object even on failure usually.
+            # However, if it crashed completely, maybe we should raise?
+            # The current contract returns FilledPdf with success=False. I will keep that.
         
         return result
+
+    def _find_data_for_field(self, field: Any, data: Dict[str, str]) -> Optional[str]:
+        """Find data value for a PdfField using smart matching."""
+        # 1. Direct Name Match
+        if field.name in data: return data[field.name]
+        
+        # 2. Label Match
+        if field.label and field.label in data: return data[field.label]
+        
+        # 3. Clean Match
+        # We want to see if any key in 'data' matches this field's label/name
+        matcher = difflib.get_close_matches
+        
+        # check against keys
+        keys = list(data.keys())
+        
+        # Try to match field label against data keys
+        if field.label:
+            matches = matcher(field.label, keys, n=1, cutoff=0.7)
+            if matches: return data[matches[0]]
+            
+        return None
 
     def _fill_overlay(
         self,
@@ -272,36 +348,34 @@ class PdfFormWriter:
                 
                 has_content = False
                 for field in page_fields:
-                    # Strategy: Exact Match > Display Name > Label > Fuzzy Match
-                    val = data.get(field.name) or data.get(field.display_name) or data.get(field.label)
-                    
-                    if not val:
-                        # Clean matching
-                        field_clean = re.sub(r'[^a-zA-Z0-9]', '', field.label.lower())
-                        
-                        for k, v in data.items():
-                            k_clean = re.sub(r'[^a-zA-Z0-9]', '', k.lower())
-                            if field_clean and k_clean and (field_clean == k_clean or field_clean in k_clean or k_clean in field_clean):
-                                val = v
-                                logger.info(f"Fuzzy matched '{k}' -> '{field.label}'")
-                                break
+                    # Strategy: Intelligent Data Lookup
+                    val = self._find_data_for_field(field, data)
                     
                     if val:
+                        # Value Transformation (formatting)
+                        val = ValueTransformer.transform(val, field.purpose)
+                        
+                        # Text Fitting (Capacity check)
+                        if field.text_capacity and len(val) > field.text_capacity:
+                             # Use simple fit logic as we know capacity
+                             fit_res = self.text_fitter.fit(val, field.text_capacity)
+                             val = fit_res.fitted
+
                         # Use field height to estimate font size if dynamic
-                        # Simple heuristic: 70% of field height
+                        # Simple heuristic: 70% of field height relative to baseline
                         font_size_to_use = self.default_font_size
                         if field.position.height > 5:
-                            estimated_size = field.position.height * 0.7
+                            estimated_size = field.position.height * 0.75 # bumped slightly
                             font_size_to_use = max(self.min_font_size, min(estimated_size, 14.0))
 
                         # Coordinates
-                        x = field.position.x
+                        x = field.position.x + 2 # Slight X padding
                         
                         # ReportLab Y is from bottom.
                         # Field Y from parser is from top to top-of-field.
                         # To align baseline: PageHeight - (y_from_top + height)
                         # We add a small padding for visual lift off the underline
-                        y = float(page.mediabox.height) - (field.position.y + field.position.height) + 2.0
+                        y = float(page.mediabox.height) - (field.position.y + field.position.height) + 3.0 # Lifted +3
                         
                         try:
                             can.setFont("Helvetica", font_size_to_use)
@@ -339,6 +413,36 @@ class PdfFormWriter:
             logger.error(traceback.format_exc())
             result.warnings.append(f"Visual filling failed: {e}")
     
+    def _smart_match_field(self, target_name: str, available_fields: List[str]) -> Optional[str]:
+        """Find best matching field name using fuzzy logic."""
+        # 1. Exact match
+        if target_name in available_fields:
+            return target_name
+            
+        # 2. Case-insensitive
+        lower_map = {f.lower(): f for f in available_fields}
+        if target_name.lower() in lower_map:
+            return lower_map[target_name.lower()]
+            
+        # 3. Clean matching (remove special chars)
+        def clean(s): return re.sub(r'[^a-z0-9]', '', s.lower())
+        target_clean = clean(target_name)
+        clean_map = {clean(f): f for f in available_fields}
+        if target_clean in clean_map:
+            return clean_map[target_clean]
+            
+        # 4. Fuzzy Match (difflib)
+        matches = difflib.get_close_matches(target_name, available_fields, n=1, cutoff=0.7)
+        if matches:
+            return matches[0]
+            
+        # 5. Fallback: Check containment
+        for f in available_fields:
+            if target_clean in clean(f) or clean(f) in target_clean:
+                return f
+                
+        return None
+
     def _fill_field(
         self,
         writer: PdfWriter,
@@ -347,49 +451,57 @@ class PdfFormWriter:
         fields: Dict[str, Any],
         fit_text: bool = True,
     ) -> FieldFillResult:
-        """Fill a single form field."""
+        """Fill a single form field with intelligent matching and fallback."""
         original_value = value
         fit_result = None
         
         try:
-            # Check if field exists
-            if field_name not in fields:
-                # Try partial matching
-                matched = None
-                for fname in fields:
-                    if field_name.lower() in fname.lower() or fname.lower() in field_name.lower():
-                        matched = fname
-                        break
-                
-                if not matched:
-                    return FieldFillResult(
-                        field_name=field_name,
-                        success=False,
-                        original_value=original_value,
-                        filled_value="",
-                        error=f"Field not found in PDF"
-                    )
-                field_name = matched
+            # 1. Smart Match Field Name
+            matched_field_name = self._smart_match_field(field_name, list(fields.keys()))
             
+            if not matched_field_name:
+                return FieldFillResult(
+                    field_name=field_name,
+                    success=False,
+                    original_value=original_value,
+                    filled_value="",
+                    error=f"Field not found in PDF (tried fuzzy match)"
+                )
+            
+            field_name = matched_field_name
             field_info = fields[field_name]
             field_type = field_info.get("/FT", "")
             
-            # Get field constraints
+            # 2. Limit Check & Validation (Pre-fill)
             max_length = field_info.get("/MaxLen")
             
-            # Apply text fitting if needed
+            # Detect subtle purpose from name for transformation
+            # (In a full implementation, we'd use the parser's context, but here we have raw writer fields)
+            purpose = "text"
+            fname_lower = field_name.lower()
+            if "phone" in fname_lower or "mobile" in fname_lower: purpose = "phone"
+            elif "date" in fname_lower or "dob" in fname_lower: purpose = "date"
+            elif "ssn" in fname_lower: purpose = "ssn"
+            
+            # 3. Value Transformation
+            value = ValueTransformer.transform(value, purpose)
+            
+            # 4. Text Fitting (if applicable)
             if fit_text and field_type == "/Tx" and max_length:
-                field_context = {
-                    "name": field_name,
-                    "type": "text",
-                    "max_length": max_length,
-                }
-                fit_result = self.text_fitter.fit(
-                    value, 
-                    max_length, 
-                    field_context
-                )
-                value = fit_result.fitted
+                # If value is still too long after transformation, use key-value text compression
+                if len(value) > max_length:
+                    field_context = {
+                        "name": field_name,
+                        "type": "text",
+                        "max_length": max_length,
+                        "purpose": purpose
+                    }
+                    fit_result = self.text_fitter.fit(
+                        value, 
+                        max_length, 
+                        field_context
+                    )
+                    value = fit_result.fitted
             
             # Fill based on field type
             if field_type == "/Tx":  # Text field

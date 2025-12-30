@@ -3,6 +3,7 @@ import pytest
 from unittest.mock import MagicMock, patch, ANY
 import io
 from services.pdf.pdf_parser import _parse_visual_form, PdfField, FieldType
+from services.pdf.exceptions import PdfParsingError, PdfServiceError
 
 class TestVisualParser:
     """Tests for visual form parsing logic."""

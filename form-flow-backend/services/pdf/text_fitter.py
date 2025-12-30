@@ -17,122 +17,17 @@ Features:
 
 import logging
 import re
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple, Callable
+from difflib import SequenceMatcher
 
-logger = logging.getLogger(__name__)
+# Enterprise Infrastructure
+from .utils import get_logger, benchmark
+from .domain import FieldContext
+from .abbreviations import get_abbreviations
+from services.ai.local_llm import get_local_llm_service, LocalLLMService
 
-
-# =============================================================================
-# Abbreviation Dictionaries
-# =============================================================================
-
-# Address abbreviations (USPS standard)
-ADDRESS_ABBREVIATIONS = {
-    "Street": "St",
-    "Avenue": "Ave",
-    "Road": "Rd",
-    "Boulevard": "Blvd",
-    "Drive": "Dr",
-    "Lane": "Ln",
-    "Court": "Ct",
-    "Place": "Pl",
-    "Circle": "Cir",
-    "Highway": "Hwy",
-    "Parkway": "Pkwy",
-    "Terrace": "Ter",
-    "Trail": "Trl",
-    "Way": "Way",
-    "North": "N",
-    "South": "S",
-    "East": "E",
-    "West": "W",
-    "Northeast": "NE",
-    "Northwest": "NW",
-    "Southeast": "SE",
-    "Southwest": "SW",
-    "Apartment": "Apt",
-    "Suite": "Ste",
-    "Building": "Bldg",
-    "Floor": "Fl",
-    "Room": "Rm",
-    "Unit": "Unit",
-}
-
-# Title abbreviations
-TITLE_ABBREVIATIONS = {
-    "Doctor": "Dr",
-    "Professor": "Prof",
-    "Mister": "Mr",
-    "Misses": "Mrs",
-    "Miss": "Ms",
-    "Junior": "Jr",
-    "Senior": "Sr",
-    "Incorporated": "Inc",
-    "Corporation": "Corp",
-    "Company": "Co",
-    "Limited": "Ltd",
-}
-
-# State abbreviations (US)
-STATE_ABBREVIATIONS = {
-    "Alabama": "AL", "Alaska": "AK", "Arizona": "AZ", "Arkansas": "AR",
-    "California": "CA", "Colorado": "CO", "Connecticut": "CT", "Delaware": "DE",
-    "Florida": "FL", "Georgia": "GA", "Hawaii": "HI", "Idaho": "ID",
-    "Illinois": "IL", "Indiana": "IN", "Iowa": "IA", "Kansas": "KS",
-    "Kentucky": "KY", "Louisiana": "LA", "Maine": "ME", "Maryland": "MD",
-    "Massachusetts": "MA", "Michigan": "MI", "Minnesota": "MN", "Mississippi": "MS",
-    "Missouri": "MO", "Montana": "MT", "Nebraska": "NE", "Nevada": "NV",
-    "New Hampshire": "NH", "New Jersey": "NJ", "New Mexico": "NM", "New York": "NY",
-    "North Carolina": "NC", "North Dakota": "ND", "Ohio": "OH", "Oklahoma": "OK",
-    "Oregon": "OR", "Pennsylvania": "PA", "Rhode Island": "RI", "South Carolina": "SC",
-    "South Dakota": "SD", "Tennessee": "TN", "Texas": "TX", "Utah": "UT",
-    "Vermont": "VT", "Virginia": "VA", "Washington": "WA", "West Virginia": "WV",
-    "Wisconsin": "WI", "Wyoming": "WY", "District of Columbia": "DC",
-}
-
-# Month abbreviations
-MONTH_ABBREVIATIONS = {
-    "January": "Jan", "February": "Feb", "March": "Mar", "April": "Apr",
-    "May": "May", "June": "Jun", "July": "Jul", "August": "Aug",
-    "September": "Sep", "October": "Oct", "November": "Nov", "December": "Dec",
-}
-
-# Common word abbreviations
-COMMON_ABBREVIATIONS = {
-    "Number": "No",
-    "Numbers": "Nos",
-    "Telephone": "Tel",
-    "Extension": "Ext",
-    "Department": "Dept",
-    "Information": "Info",
-    "Reference": "Ref",
-    "International": "Intl",
-    "Association": "Assn",
-    "University": "Univ",
-    "Institute": "Inst",
-    "Foundation": "Fdn",
-    "Organization": "Org",
-    "Government": "Govt",
-    "Approximately": "Approx",
-    "Additional": "Addl",
-    "Maximum": "Max",
-    "Minimum": "Min",
-    "Average": "Avg",
-    "Estimated": "Est",
-    "Continued": "Cont",
-    "Certificate": "Cert",
-    "Professional": "Prof",
-}
-
-# Combine all abbreviations
-ALL_ABBREVIATIONS = {
-    **ADDRESS_ABBREVIATIONS,
-    **TITLE_ABBREVIATIONS,
-    **STATE_ABBREVIATIONS,
-    **MONTH_ABBREVIATIONS,
-    **COMMON_ABBREVIATIONS,
-}
+logger = get_logger(__name__)
 
 
 # =============================================================================
@@ -145,18 +40,82 @@ class FitResult:
     original: str
     fitted: str
     strategy_used: str
+    score: float = 0.0  # Quality score (0.0 - 1.0)
     font_size: Optional[float] = None
     truncated: bool = False
     overflow: bool = False
-    changes_made: List[str] = None
-    
-    def __post_init__(self):
-        if self.changes_made is None:
-            self.changes_made = []
+    changes_made: List[str] = field(default_factory=list)
     
     @property
     def was_modified(self) -> bool:
         return self.original != self.fitted
+
+
+class LLMTextCompressor:
+    """Uses Local LLM Service to compress text intelligently."""
+    
+    def __init__(self):
+        # Lazy load service to avoid startup overhead
+        self._service: Optional[LocalLLMService] = None
+        
+    @property
+    def service(self) -> Optional[LocalLLMService]:
+        if not self._service:
+            # Try to get service, might return None if disabled/failed
+            self._service = get_local_llm_service()
+        return self._service
+        
+    def compress(self, text: str, max_chars: int, field_context: Dict[str, Any]) -> Optional[str]:
+        """
+        Compress text using LLM.
+        
+        Args:
+            text: Text to compress
+            max_chars: Target character count
+            field_context: Metadata about the field
+            
+        Returns:
+            Compressed string if successful, None otherwise
+        """
+        service = self.service
+        if not service:
+            return None
+            
+        field_label = field_context.get("label", "field")
+        field_type = field_context.get("type", "text")
+        
+        # We construct a prompt for the Local LLM's extraction/generation capability
+        # The LocalLLMService is optimized for field extraction but can handle
+        # simple instruction following if the prompt is structured right.
+        prompt = f"""
+        Compress this text to under {max_chars} characters for a {field_type} field named "{field_label}".
+        Keep all key info. Use standard abbreviations.
+        Original: "{text}"
+        Compressed:
+        """
+        
+        try:
+            # We use the raw generation capability or 'extract_field_value' wrapper?
+            # extract_field_value expects 'user_input' and 'field_name'.
+            
+            result = service.extract_field_value(
+                user_input=text,
+                field_name=f"compressed version (max {max_chars} chars)"
+            )
+            
+            compressed = result.get("value", "").strip()
+            
+            # Validate result
+            if compressed and len(compressed) <= max_chars and len(compressed) > 0:
+                # Basic sanity check: shouldn't be completely different
+                ratio = SequenceMatcher(None, text, compressed).ratio()
+                if ratio > 0.1: # At least some similarity
+                    return compressed
+            
+        except Exception as e:
+            logger.warning(f"LLM compression failed: {e}")
+            
+        return None
 
 
 # =============================================================================
@@ -167,393 +126,156 @@ class TextFitter:
     """
     Intelligent text fitter for space-constrained form fields.
     
-    Uses multiple strategies to fit text into limited space while
-    preserving meaning and readability.
+    Uses a multi-strategy competitive approach:
+    1. Try multiple compression strategies (abbreviation, stopwords, LLM, etc.)
+    2. Score each result based on length, readability, and info retention.
+    3. Select the best valid result.
     """
     
-    MIN_FONT_SIZE = 6.0  # Minimum readable font size
+    MIN_FONT_SIZE = 6.0
     
-    def __init__(
-        self,
-        llm_client: Optional[Any] = None,
-        custom_abbreviations: Optional[Dict[str, str]] = None,
-    ):
-        """
-        Initialize TextFitter.
+    def __init__(self, domain: str = "general"):
+        self.abbreviations = get_abbreviations(domain)
+        self.llm_compressor = LLMTextCompressor()
         
-        Args:
-            llm_client: Optional LLM client for intelligent compression
-            custom_abbreviations: Additional abbreviations to use
-        """
-        self.llm_client = llm_client
-        self.abbreviations = {**ALL_ABBREVIATIONS}
-        if custom_abbreviations:
-            self.abbreviations.update(custom_abbreviations)
-    
     def fit(
         self,
         text: str,
         max_chars: int,
         field_context: Optional[Dict[str, Any]] = None,
         allow_truncation: bool = True,
-        allow_font_resize: bool = True,
-        min_font_size: float = 6.0,
     ) -> FitResult:
         """
-        Fit text to field constraints.
-        
-        Args:
-            text: Original text to fit
-            max_chars: Maximum characters allowed
-            field_context: Field metadata (type, label, etc.)
-            allow_truncation: Whether truncation is acceptable
-            allow_font_resize: Whether font size can be reduced
-            min_font_size: Minimum font size if resizing
-            
-        Returns:
-            FitResult with fitted text and metadata
+        Fit text to field constraints using best strategy.
         """
+        if not text:
+             return FitResult(text, text, "empty")
+             
         field_context = field_context or {}
         original = text.strip()
         
-        # Strategy 1: Direct fit
+        # 1. Check if direct fit works
         if len(original) <= max_chars:
-            return FitResult(
-                original=original,
-                fitted=original,
-                strategy_used="direct_fit",
-            )
+            return FitResult(original, original, "direct_fit", score=1.0)
+            
+        # 2. Gather Candidates
+        candidates: List[FitResult] = []
         
-        # Strategy 2: Apply abbreviations
-        abbreviated = self.apply_abbreviations(original)
-        if len(abbreviated) <= max_chars:
-            return FitResult(
-                original=original,
-                fitted=abbreviated,
-                strategy_used="abbreviations",
-                changes_made=["Applied standard abbreviations"],
-            )
+        # Strategy A: Abbreviations
+        abbr_text = self._apply_abbreviations(original)
+        if len(abbr_text) <= max_chars:
+            candidates.append(FitResult(
+                original, abbr_text, "abbreviations", 
+                score=self._calculate_score(original, abbr_text),
+                changes_made=["Applied abbreviations"]
+            ))
+            
+        # Strategy B: Stop Word Removal (on top of abbreviations)
+        stop_text = self._remove_stop_words(abbr_text)
+        if len(stop_text) <= max_chars:
+             candidates.append(FitResult(
+                original, stop_text, "stop_words",
+                score=self._calculate_score(original, stop_text) * 0.95, # Slight penalty
+                changes_made=["Removed stop words"]
+            ))
         
-        # Strategy 3: Remove middle names (for name fields)
-        field_type = field_context.get("purpose", "")
-        if field_type in ("name", "full_name"):
-            short_name = self.shorten_name(original)
-            if len(short_name) <= max_chars:
-                return FitResult(
-                    original=original,
-                    fitted=short_name,
-                    strategy_used="name_shortening",
-                    changes_made=["Removed middle names/initials"],
-                )
+        # Strategy C: Address Compression (Specific)
+        if field_context.get("type") == "address" or field_context.get("purpose") == "address":
+            addr_text = self._compress_address_structured(original, max_chars)
+            if len(addr_text) <= max_chars:
+                candidates.append(FitResult(
+                    original, addr_text, "structured_address",
+                    score=0.98, # High confidence in structured rule
+                    changes_made=["Structured address compression"]
+                ))
+                
+        # Strategy D: LLM Compression (Slowest/Most expensive, try last if nothing else fits well)
+        # Only try if we don't have a good candidate yet or if we really need semantic compression
+        if not candidates or all(c.score < 0.8 for c in candidates):
+            llm_text = self.llm_compressor.compress(original, max_chars, field_context)
+            if llm_text:
+                candidates.append(FitResult(
+                    original, llm_text, "llm_compression",
+                    score=self._calculate_score(original, llm_text),
+                    changes_made=["AI semantic compression"]
+                ))
         
-        # Strategy 4: Address-specific compression
-        if field_type == "address":
-            short_address = self.compress_address(original, max_chars)
-            if len(short_address) <= max_chars:
-                return FitResult(
-                    original=original,
-                    fitted=short_address,
-                    strategy_used="address_compression",
-                    changes_made=["Compressed address format"],
-                )
-        
-        # Strategy 5: Remove non-essential words
-        condensed = self.remove_stop_words(abbreviated)
-        if len(condensed) <= max_chars:
-            return FitResult(
-                original=original,
-                fitted=condensed,
-                strategy_used="stop_word_removal",
-                changes_made=["Removed non-essential words"],
-            )
-        
-        # Strategy 6: LLM-based compression (if available)
-        if self.llm_client and len(condensed) > max_chars:
-            try:
-                llm_result = self.compress_with_llm(
-                    original, 
-                    max_chars, 
-                    field_context
-                )
-                if llm_result and len(llm_result) <= max_chars:
-                    return FitResult(
-                        original=original,
-                        fitted=llm_result,
-                        strategy_used="llm_compression",
-                        changes_made=["AI-compressed while preserving meaning"],
-                    )
-            except Exception as e:
-                logger.warning(f"LLM compression failed: {e}")
-        
-        # Strategy 7: Truncation with ellipsis
+        # 3. Select Best Candidate
+        if candidates:
+            # Sort by score desc
+            candidates.sort(key=lambda x: x.score, reverse=True)
+            return candidates[0]
+            
+        # 4. Fallbacks (Truncation)
         if allow_truncation:
-            truncated = condensed[:max_chars - 3].rstrip() + "..."
+            truncated = original[:max_chars-3].strip() + "..."
             return FitResult(
-                original=original,
-                fitted=truncated,
-                strategy_used="truncation",
-                truncated=True,
-                changes_made=["Truncated with ellipsis"],
+                original, truncated, "truncation", 
+                score=0.1, truncated=True, 
+                changes_made=["Truncated"]
             )
-        
-        # Last resort: Hard truncation
+            
+        # Hard fail
         return FitResult(
-            original=original,
-            fitted=condensed[:max_chars],
-            strategy_used="hard_truncation",
-            truncated=True,
-            overflow=True,
-            changes_made=["Hard truncation (data may be lost)"],
+            original, original[:max_chars], "hard_cut", 
+            score=0.0, truncated=True, overflow=True
         )
-    
-    def apply_abbreviations(self, text: str) -> str:
-        """Apply all abbreviation rules to text."""
+
+    def _apply_abbreviations(self, text: str) -> str:
+        """Apply dictionary substitutions."""
         result = text
+        # Sort keys by length to replace longest matches first
+        sorted_keys = sorted(self.abbreviations.keys(), key=len, reverse=True)
         
-        # Sort by length (longest first) to avoid partial replacements
-        sorted_abbrevs = sorted(
-            self.abbreviations.items(),
-            key=lambda x: len(x[0]),
-            reverse=True
-        )
-        
-        for full, abbr in sorted_abbrevs:
-            # Case-insensitive replacement preserving word boundaries
-            pattern = r'\b' + re.escape(full) + r'\b'
-            result = re.sub(pattern, abbr, result, flags=re.IGNORECASE)
-        
+        for key in sorted_keys:
+            # Whole word match only
+            pattern = re.compile(r'\b' + re.escape(key) + r'\b', re.IGNORECASE)
+            result = pattern.sub(self.abbreviations[key], result)
+            
         return result
-    
-    def shorten_name(self, name: str) -> str:
-        """
-        Shorten a name by removing/abbreviating middle names.
-        
-        Examples:
-            "John Michael Smith" -> "John M. Smith"
-            "John M. Smith" -> "John Smith"
-            "John Smith" -> "J. Smith"
-        """
-        parts = name.split()
-        
-        if len(parts) <= 2:
-            # Already short, try first initial
-            if len(parts) == 2:
-                return f"{parts[0][0]}. {parts[1]}"
-            return name
-        
-        # Try removing middle names first
-        first = parts[0]
-        last = parts[-1]
-        
-        # Keep first name and last name only
-        shortened = f"{first} {last}"
-        if len(shortened) <= len(name):
-            return shortened
-        
-        # Use first initial
-        return f"{first[0]}. {last}"
-    
-    def compress_address(self, address: str, max_chars: int) -> str:
-        """Compress an address to fit within character limit."""
-        # First apply standard abbreviations
-        result = self.apply_abbreviations(address)
-        
-        if len(result) <= max_chars:
-            return result
-        
-        # Remove apartment/suite if secondary
-        result = re.sub(r',?\s*(Apt|Ste|Unit|#)\s*\d+\w*', '', result, flags=re.IGNORECASE)
-        
-        if len(result) <= max_chars:
-            return result.strip()
-        
-        # Remove zip code extension
-        result = re.sub(r'-\d{4}$', '', result)
-        
-        if len(result) <= max_chars:
-            return result.strip()
-        
-        # Try removing state if city is present
-        # (risky but may be acceptable for some forms)
-        parts = result.split(',')
-        if len(parts) >= 3:
-            result = ', '.join(parts[:-1])
-        
-        return result.strip()[:max_chars]
-    
-    def remove_stop_words(self, text: str) -> str:
-        """Remove non-essential words while preserving meaning."""
-        stop_words = {
-            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to',
-            'for', 'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are',
-            'were', 'been', 'being', 'have', 'has', 'had', 'do', 'does',
-            'did', 'will', 'would', 'could', 'should', 'may', 'might',
-            'must', 'shall', 'this', 'that', 'these', 'those'
-        }
-        
-        words = text.split()
-        result = [w for w in words if w.lower() not in stop_words]
-        return ' '.join(result)
-    
-    def compress_with_llm(
-        self,
-        text: str,
-        max_chars: int,
-        field_context: Dict[str, Any],
-    ) -> Optional[str]:
-        """
-        Use LLM to intelligently compress text.
-        
-        Args:
-            text: Text to compress
-            max_chars: Maximum characters
-            field_context: Field metadata for context
-            
-        Returns:
-            Compressed text or None if failed
-        """
-        if not self.llm_client:
-            return None
-        
-        field_label = field_context.get("label", "form field")
-        field_type = field_context.get("type", "text")
-        
-        prompt = f"""Compress the following text to fit within {max_chars} characters while preserving all essential meaning.
 
-This is for a {field_type} field labeled "{field_label}".
+    def _remove_stop_words(self, text: str) -> str:
+        """Remove common Non-essential words."""
+        stops = {'the', 'a', 'an', 'and', 'or', 'of', 'for', 'with', 'in', 'on', 'at', 'by'}
+        return " ".join([w for w in text.split() if w.lower() not in stops])
 
-Original text: "{text}"
+    def _compress_address_structured(self, text: str, max_chars: int) -> str:
+        """Heuristic compression for addresses."""
+        # 1. Standard abbreviations
+        temp = self._apply_abbreviations(text)
+        if len(temp) <= max_chars: return temp
+        
+        # 2. Remove zip extension (12345-6789 -> 12345)
+        temp = re.sub(r'-\d{4}\b', '', temp)
+        if len(temp) <= max_chars: return temp
+        
+        # 3. Remove "USA", "United States"
+        temp = re.sub(r',\s*(USA|US|United States)\b', '', temp)
+        if len(temp) <= max_chars: return temp
+        
+        return temp
 
-Rules:
-- Use standard abbreviations (St, Ave, Dr, etc.)
-- Remove unnecessary words
-- Keep all critical information
-- Must be {max_chars} characters or less
-- Maintain readability
-
-Compressed text:"""
+    def _calculate_score(self, original: str, fitted: str) -> float:
+        """Score the quality of the fit (0.0 to 1.0)."""
+        if not fitted: return 0.0
         
-        try:
-            # This assumes a simple interface; adjust for actual LLM client
-            response = self.llm_client.generate(prompt, max_tokens=max_chars * 2)
-            compressed = response.strip().strip('"')
-            return compressed if len(compressed) <= max_chars else None
-        except Exception as e:
-            logger.warning(f"LLM compression error: {e}")
-            return None
-    
-    def calculate_optimal_font_size(
-        self,
-        text: str,
-        field_width: float,
-        field_height: float,
-        base_font_size: float = 12.0,
-        min_font_size: float = 6.0,
-    ) -> Tuple[float, int]:
-        """
-        Calculate optimal font size to fit text.
+        # Length Penalty (too short might mean info loss)
+        len_ratio = len(fitted) / len(original)
+        if len_ratio < 0.2: return 0.4 # Suspiciously short
         
-        Returns:
-            Tuple of (font_size, lines_needed)
-        """
-        # Approximate: avg char width = 0.5 * font_size
-        for font_size in [base_font_size, 10, 9, 8, 7, min_font_size]:
-            avg_char_width = font_size * 0.5
-            chars_per_line = int(field_width / avg_char_width) if avg_char_width > 0 else 50
-            
-            if len(text) <= chars_per_line:
-                return font_size, 1
-            
-            # Check multi-line
-            line_height = font_size * 1.2
-            max_lines = int(field_height / line_height) if line_height > 0 else 1
-            
-            lines_needed = (len(text) + chars_per_line - 1) // chars_per_line
-            
-            if lines_needed <= max_lines:
-                return font_size, lines_needed
+        # Similarity Reward (Levenshtein based)
+        # We assume higher similarity = better preservation of meaning
+        # taking into account expected compression
+        similarity = SequenceMatcher(None, original.lower(), fitted.lower()).ratio()
         
-        # Can't fit even at minimum size
-        return min_font_size, 1
-    
-    def wrap_text(
-        self,
-        text: str,
-        chars_per_line: int,
-        max_lines: Optional[int] = None,
-    ) -> List[str]:
-        """
-        Wrap text to fit within line width.
-        
-        Args:
-            text: Text to wrap
-            chars_per_line: Maximum characters per line
-            max_lines: Maximum number of lines (None for unlimited)
-            
-        Returns:
-            List of lines
-        """
-        words = text.split()
-        lines = []
-        current_line = []
-        current_length = 0
-        
-        for word in words:
-            word_len = len(word)
-            
-            # Check if word fits on current line
-            if current_length + word_len + (1 if current_line else 0) <= chars_per_line:
-                current_line.append(word)
-                current_length += word_len + (1 if len(current_line) > 1 else 0)
-            else:
-                # Start new line
-                if current_line:
-                    lines.append(' '.join(current_line))
-                current_line = [word]
-                current_length = word_len
-            
-            # Check max lines
-            if max_lines and len(lines) >= max_lines - 1:
-                break
-        
-        # Add remaining words
-        if current_line:
-            remaining = ' '.join(current_line)
-            if max_lines and len(lines) >= max_lines:
-                # Truncate last line
-                available = chars_per_line - 3
-                if len(remaining) > available:
-                    remaining = remaining[:available] + "..."
-            lines.append(remaining)
-        
-        return lines
+        # We expect some difference, so raw similarity isn't 1.0
+        # But we want to penalize drastic changes unless LLM does it
+        return min(1.0, similarity + 0.3) # Boost slightly as we expect shrinking
 
 
 # =============================================================================
-# Utility Functions
+# Helper Functions
 # =============================================================================
 
-def fit_text(
-    text: str,
-    max_chars: int,
-    field_context: Optional[Dict[str, Any]] = None,
-) -> FitResult:
-    """
-    Convenience function to fit text using default fitter.
-    
-    Args:
-        text: Text to fit
-        max_chars: Maximum characters
-        field_context: Optional field metadata
-        
-    Returns:
-        FitResult with fitted text
-    """
-    fitter = TextFitter()
-    return fitter.fit(text, max_chars, field_context)
-
-
-def apply_abbreviations(text: str) -> str:
-    """Convenience function to apply standard abbreviations."""
-    fitter = TextFitter()
-    return fitter.apply_abbreviations(text)
+def fit_text(text: str, max_chars: int, field_context: Dict = None) -> FitResult:
+    return TextFitter().fit(text, max_chars, field_context)

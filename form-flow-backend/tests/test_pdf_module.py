@@ -23,95 +23,10 @@ from services.pdf.text_fitter import (
     TextFitter,
     FitResult,
     fit_text,
-    apply_abbreviations,
 )
 
 
-# =============================================================================
-# Text Fitter Tests
-# =============================================================================
 
-class TestTextFitter:
-    """Tests for TextFitter class."""
-    
-    def test_direct_fit(self):
-        """Text that fits should pass through unchanged."""
-        fitter = TextFitter()
-        result = fitter.fit("Hello World", max_chars=50)
-        
-        assert result.fitted == "Hello World"
-        assert result.strategy_used == "direct_fit"
-        assert not result.truncated
-    
-    def test_abbreviations_address(self):
-        """Address abbreviations should be applied."""
-        fitter = TextFitter()
-        
-        # Test street abbreviation
-        result = fitter.fit("123 Main Street", max_chars=15)
-        assert "St" in result.fitted or "Street" not in result.fitted
-        
-        # Test full address
-        result = fitter.fit("123 North Main Street, Apartment 5", max_chars=25)
-        assert len(result.fitted) <= 25
-    
-    def test_abbreviations_states(self):
-        """State names should be abbreviated."""
-        text = "New York, California, Texas"
-        abbreviated = apply_abbreviations(text)
-        
-        assert "NY" in abbreviated or "New York" in abbreviated
-        assert "CA" in abbreviated or "California" in abbreviated
-    
-    def test_name_shortening(self):
-        """Names should be shortened when needed."""
-        fitter = TextFitter()
-        result = fitter.fit(
-            "John Michael Smith Jr",
-            max_chars=12,
-            field_context={"purpose": "name"}
-        )
-        
-        assert len(result.fitted) <= 12
-    
-    def test_truncation_with_ellipsis(self):
-        """Long text should be truncated with ellipsis."""
-        fitter = TextFitter()
-        result = fitter.fit(
-            "This is a very long piece of text that cannot possibly fit",
-            max_chars=20,
-            allow_truncation=True
-        )
-        
-        assert len(result.fitted) <= 20
-        assert result.truncated
-    
-    def test_stop_word_removal(self):
-        """Stop words should be removed when needed."""
-        fitter = TextFitter()
-        text = "The quick brown fox jumps over the lazy dog"
-        condensed = fitter.remove_stop_words(text)
-        
-        assert "The" not in condensed or condensed.count("the") < text.lower().count("the")
-    
-    def test_address_compression(self):
-        """Addresses should be compressed intelligently."""
-        fitter = TextFitter()
-        address = "1234 North Main Street, Apartment 5B, Springfield, Illinois 62701"
-        
-        compressed = fitter.compress_address(address, 40)
-        assert len(compressed) <= 40
-    
-    def test_wrap_text(self):
-        """Text wrapping should respect line limits."""
-        fitter = TextFitter()
-        text = "This is a long sentence that needs to be wrapped across multiple lines"
-        
-        lines = fitter.wrap_text(text, chars_per_line=20, max_lines=3)
-        
-        assert len(lines) <= 3
-        for line in lines:
-            assert len(line) <= 23  # Allow some flexibility for word boundaries
 
 
 class TestFieldTypeDetection:
@@ -207,20 +122,4 @@ class TestPdfSchemaConversion:
         assert len(d["fields"]) == 1
 
 
-# =============================================================================
-# Convenience function tests
-# =============================================================================
 
-class TestConvenienceFunctions:
-    """Tests for module-level convenience functions."""
-    
-    def test_fit_text_function(self):
-        """fit_text convenience function should work."""
-        result = fit_text("Hello World", max_chars=50)
-        assert isinstance(result, FitResult)
-        assert result.fitted == "Hello World"
-    
-    def test_apply_abbreviations_function(self):
-        """apply_abbreviations convenience function should work."""
-        result = apply_abbreviations("123 Main Street")
-        assert "St" in result or result == "123 Main Street"

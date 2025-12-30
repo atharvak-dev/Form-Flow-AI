@@ -21,6 +21,11 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import io
 import re
 
+# Enterprise Infrastructure
+from .exceptions import PdfParsingError, PdfResourceError
+from .utils import get_logger, benchmark, PerformanceTimer
+from .domain import FieldContext, FieldGroup, GroupType, ValidationReport
+
 # PDF Libraries
 try:
     import pdfplumber
@@ -42,7 +47,7 @@ except ImportError:
     pytesseract = None
     convert_from_path = None
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # =============================================================================
@@ -116,6 +121,7 @@ class PdfField:
     group_name: Optional[str] = None  # For radio button groups
     display_name: Optional[str] = None  # User-friendly label
     purpose: Optional[str] = None  # Semantic purpose (email, phone, etc.)
+    context: Optional[FieldContext] = None  # Rich context from surroundings
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -154,6 +160,7 @@ class PdfFormSchema:
     file_name: str
     total_pages: int
     fields: List[PdfField]
+    groups: List[FieldGroup] = field(default_factory=list)
     is_xfa: bool = False
     is_scanned: bool = False
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -177,6 +184,7 @@ class PdfFormSchema:
             "is_xfa": self.is_xfa,
             "is_scanned": self.is_scanned,
             "fields": [f.to_dict() for f in self.fields],
+            "groups": [g.__dict__ for g in self.groups],  # Basic dict serialization
             "metadata": self.metadata,
         }
 
@@ -287,6 +295,102 @@ def _detect_field_type(field_info: Dict[str, Any], field_name: str) -> FieldType
         return FieldType.SIGNATURE
     
     return FieldType.UNKNOWN
+
+
+def _detect_field_type_enhanced(
+    field_info: Dict[str, Any], 
+    field_name: str, 
+    context: Optional[FieldContext] = None
+) -> FieldType:
+    """
+    Enhanced field type detection using PDF metadata and context.
+    
+    Args:
+        field_info: Raw dictionary from PDF
+        field_name: Internal field name
+        context: Rich context (nearby text, label, etc.)
+        
+    Returns:
+        Detected FieldType
+    """
+    # 1. Start with technical type from PDF structure
+    base_type = _detect_field_type(field_info, field_name)
+    
+    if base_type != FieldType.TEXT and base_type != FieldType.UNKNOWN:
+        return base_type
+        
+    # 2. Use context to refine TEXT fields into semantic types
+    text_to_analyze = [field_name]
+    if context:
+        if context.nearby_text: text_to_analyze.append(context.nearby_text)
+        if context.instructions: text_to_analyze.append(context.instructions)
+        # Also check label if explicitly extracted beforehand (though often in nearby_text)
+        
+    combined_text = " ".join(text_to_analyze).lower()
+    
+    # 3. Pattern Matching
+    if any(x in combined_text for x in ["date", "dob", "birth", "mm/dd", "dd/mm", "xxxx-xx-xx"]):
+        return FieldType.DATE
+        
+    if any(x in combined_text for x in ["email", "e-mail"]):
+        return FieldType.EMAIL
+        
+    if any(x in combined_text for x in ["phone", "cell", "mobile", "tel", "fax", "contact no"]):
+        return FieldType.PHONE
+        
+    if any(x in combined_text for x in ["ssn", "social security", "tax id", "ein"]):
+        return FieldType.TEXT  # Keep as TEXT but maybe flag as sensitive? Or regex pattern later.
+        
+    if any(x in combined_text for x in ["zip", "postal code", "pincode"]):
+        return FieldType.TEXT # Specialized text
+        
+    if any(x in combined_text for x in ["amount", "price", "total", "cost", "fee", "$", "€", "£"]):
+        return FieldType.NUMBER
+        
+    if any(x in combined_text for x in ["signature", "sign here", "signed"]):
+        return FieldType.SIGNATURE
+        
+    return base_type
+
+
+def _extract_validation_rules(
+    field_info: Dict[str, Any], 
+    context: Optional[FieldContext] = None
+) -> FieldConstraints:
+    """
+    Extract validation rules from PDF constraints and context instructions.
+    """
+    # Base constraints from PDF flags (MaxLen, Required, etc.)
+    constraints = _extract_constraints(field_info)
+    
+    if not context:
+        return constraints
+        
+    combined_text = (context.instructions + " " + context.nearby_text).lower()
+    
+    # 1. Detect Required (visual cues like *)
+    if "*" in combined_text or "required" in combined_text or context.is_required_visually:
+        constraints.required = True
+        
+    # 2. Detect Date Format
+    if "mm/dd/yyyy" in combined_text:
+        constraints.pattern = r"^\d{2}/\d{2}/\d{4}$"
+    elif "dd/mm/yyyy" in combined_text:
+        constraints.pattern = r"^\d{2}/\d{2}/\d{4}$"
+    elif "yyyy-mm-dd" in combined_text:
+        constraints.pattern = r"^\d{4}-\d{2}-\d{2}$"
+        
+    # 3. Detect Phone Format
+    if "phone" in combined_text or "tel" in combined_text:
+        # Generic loose phone match
+        if not constraints.pattern:
+            constraints.pattern = r"^[\d\+\-\(\)\s\.]+$"
+            
+    # 4. Detect Email
+    if "email" in combined_text:
+        constraints.pattern = r"^[\w\.-]+@[\w\.-]+\.\w+$"
+        
+    return constraints
 
 
 def _extract_constraints(field_info: Dict[str, Any]) -> FieldConstraints:
@@ -433,11 +537,69 @@ def _detect_purpose(field_name: str, label: str) -> Optional[str]:
     
     return None
 
+# =============================================================================
+# Field Grouping Logic
+# =============================================================================
+
+def _group_fields(fields: List[PdfField]) -> List[FieldGroup]:
+    """
+    Analyze fields and organize them into logical groups.
+    
+    Strategies:
+    1. Radio Button Groups (Same Name)
+    2. Address Blocks (Semantic Proximity)
+    3. Repeating Sections (Name patterns)
+    """
+    groups = []
+    
+    # 1. Radio Groups
+    radio_map: Dict[str, List[PdfField]] = {}
+    for f in fields:
+        if f.field_type == FieldType.RADIO:
+            if f.name not in radio_map:
+                radio_map[f.name] = []
+            radio_map[f.name].append(f)
+            
+    for name, radio_fields in radio_map.items():
+        if len(radio_fields) > 1:
+            group = FieldGroup(
+                id=f"group_radio_{name}",
+                group_type=GroupType.LOGICAL,
+                fields=[f.id for f in radio_fields],
+                label=radio_fields[0].label or name,
+            )
+            groups.append(group)
+            
+    # 2. Address Grouping
+    # Find clusters of address-related fields
+    address_fields = [f for f in fields if f.purpose in ("address", "city", "state", "zip", "country")]
+    # Simple strategy: if we perceive address fields on the same page within reasonable Y distance
+    
+    # TODO: Advanced spatial clustering for addresses
+    # For now, if we have explicit address fields, group them
+    if address_fields:
+        # Check if they look like they belong to the same entity (e.g. valid single address block)
+        # Verify mostly unique types (1 city, 1 state, etc.) or clear separation
+        has_addr = any(f.purpose == "address" for f in address_fields)
+        has_zip = any(f.purpose == "zip" for f in address_fields)
+        
+        if has_addr and has_zip:
+             # Create a naive single address group for now
+             # Improvement: Detect multiple address blocks
+            groups.append(FieldGroup(
+                id="group_address_primary",
+                group_type=GroupType.ADDRESS,
+                fields=[f.id for f in address_fields],
+                label="Primary Address"
+            ))
+            
+    return groups
 
 # =============================================================================
 # Main Parsing Functions
 # =============================================================================
 
+@benchmark("parse_acroform")
 def _parse_acroform(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
     """Parse AcroForm fields from PDF."""
     fields = []
@@ -472,21 +634,8 @@ def _parse_acroform(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
                         page_num = i
                         break
             
-            # Extract field type
-            field_type = _detect_field_type(field_info, field_name)
-            if field_type == FieldType.BUTTON:
-                continue  # Skip push buttons
-            
             # Extract position
             position = _extract_field_position(field_info, page_num)
-            
-            # Extract constraints
-            constraints = _extract_constraints(field_info)
-            
-            # Extract options for choice fields
-            options = []
-            if field_type in (FieldType.DROPDOWN, FieldType.LISTBOX, FieldType.RADIO):
-                options = _extract_options(field_info)
             
             # Find label
             page_blocks = page_texts.get(page_num, [])
@@ -496,6 +645,26 @@ def _parse_acroform(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
             tooltip = field_info.get("/TU", "") or field_info.get("/T", "")
             if not label and tooltip:
                 label = str(tooltip)
+            
+            # BUILD CONTEXT
+            context = FieldContext(
+                nearby_text=label,
+                instructions=str(tooltip) if tooltip else "",
+                is_required_visually=("*" in label)
+            )
+
+            # Extract field type (ENHANCED)
+            field_type = _detect_field_type_enhanced(field_info, field_name, context)
+            if field_type == FieldType.BUTTON:
+                continue  # Skip push buttons
+
+            # Extract constraints (ENHANCED)
+            constraints = _extract_validation_rules(field_info, context)
+            
+            # Extract options for choice fields
+            options = []
+            if field_type in (FieldType.DROPDOWN, FieldType.LISTBOX, FieldType.RADIO):
+                options = _extract_options(field_info)
             
             # Get current value
             current_value = field_info.get("/V")
@@ -539,6 +708,7 @@ def _parse_acroform(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
                 text_capacity=text_capacity,
                 purpose=purpose,
                 display_name=display_name,
+                context=context,
             )
             
             fields.append(pdf_field)
@@ -547,7 +717,7 @@ def _parse_acroform(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
         
     except Exception as e:
         logger.error(f"Error parsing AcroForm: {e}")
-        raise
+        raise PdfParsingError(f"AcroForm parsing failed: {str(e)}", original_error=e)
     
     # Sort by tab order / position
     fields.sort(key=lambda f: (f.position.page, f.position.y, f.position.x))
@@ -555,6 +725,7 @@ def _parse_acroform(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
     return fields
 
 
+@benchmark("parse_visual_form")
 def _parse_visual_form(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
     """
     Parse visual form patterns from text-based PDFs.
@@ -731,19 +902,14 @@ def _parse_visual_form(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
         
     except Exception as e:
         logger.error(f"Error parsing visual form: {e}")
-        # traceback.print_exc()
+        # Non-critical failure, return what we found
     
     return fields
 
-        
-
-
-
+@benchmark("parse_scanned_pdf")
 def _parse_scanned_pdf(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
     """
-    Parse scanned PDF using OCR to detect form fields.
-    
-    Uses image processing to identify blank areas that might be form fields.
+    Parse scanned PDF using OCR.
     """
     if not OCR_AVAILABLE:
         logger.warning("OCR not available. Install pytesseract and pdf2image.")
@@ -787,7 +953,7 @@ def _parse_scanned_pdf(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
                             x=x + w + 10,
                             y=y,
                             width=200,
-                            height=h,
+                            height=20,
                         ),
                         constraints=FieldConstraints(),
                         display_name=text.rstrip(":").title(),
@@ -796,10 +962,7 @@ def _parse_scanned_pdf(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
                     fields.append(field)
         
     except Exception as e:
-        logger.error(f"Error parsing scanned PDF with OCR: {e}")
-    
-    return fields
-
+        logger.warning(f"Error during OCR parsing: {e}")
 
 def parse_pdf(
     pdf_source: Union[str, Path, bytes],
@@ -860,36 +1023,56 @@ def parse_pdf(
     
     # Parse fields
     fields = []
-    is_visual_form = False
+    parsing_method = "unknown"
     
-    if is_scanned and use_ocr:
-        fields = _parse_scanned_pdf(pdf_source)
-    elif is_xfa:
-        # XFA parsing would require additional XML handling
-        # For now, try AcroForm as fallback
-        logger.warning("XFA forms have limited support. Attempting AcroForm extraction.")
-        fields = _parse_acroform(pdf_source)
-    else:
-        fields = _parse_acroform(pdf_source)
-    
-    # Fallback: Try visual form parsing if no AcroForm fields found
-    if not fields:
+    # Strategy 1: AcroForm (Standard)
+    # Even if XFA, we try AcroForm extraction first as many XFAs have AcroForm wrappers
+    if not is_scanned:
+        try:
+            fields = _parse_acroform(pdf_source)
+            if fields:
+                parsing_method = "acroform"
+                logger.info(f"AcroForm parsing successful: found {len(fields)} fields")
+        except Exception as e:
+            logger.warning(f"AcroForm parsing failed: {e}")
+
+    # Strategy 2: Visual Form (Fallback)
+    # If AcroForm yielded nothing, or if it failed, try Visual Parsing
+    if not fields and not is_scanned:
         logger.info("No AcroForm fields found, attempting visual form pattern detection...")
         fields = _parse_visual_form(pdf_source)
-        is_visual_form = len(fields) > 0
-        if is_visual_form:
+        if fields:
+            parsing_method = "visual"
             logger.info(f"Visual form parsing successful: found {len(fields)} fields")
-    
+
+    # Strategy 3: OCR (Last Resort)
+    # If still no fields, and OCR is allowed, try it.
+    # This handles "Scanned" files or just image-heavy PDFs that failed detection.
+    if not fields and use_ocr:
+        logger.info("No text fields found. Attempting OCR extraction...")
+        fields = _parse_scanned_pdf(pdf_source)
+        if fields:
+            parsing_method = "ocr"
+            logger.info(f"OCR parsing successful: found {len(fields)} fields")
+            
+    # Metadata update
+    if parsing_method == "visual" or parsing_method == "ocr":
+        # Mark as scanned/visual in schema if fallback was used
+        is_scanned = True 
+
+    # Generate groups
+    groups = _group_fields(fields)
+
     return PdfFormSchema(
         file_path=file_path,
         file_name=file_name,
         total_pages=total_pages,
         fields=fields,
+        groups=groups,
         is_xfa=is_xfa,
-        is_scanned=is_scanned or is_visual_form,  # Treat visual forms similarly
+        is_scanned=is_scanned,
         metadata=metadata,
     )
-
 
 # =============================================================================
 # Utility Functions
