@@ -643,7 +643,19 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
                                     {/* Fallback to Keyboard */}
                                     {!showTextInput && (
                                         <button
-                                            onClick={() => setShowTextInput(true)}
+                                            onClick={() => {
+                                                // Stop voice recognition and auto-submit
+                                                if (isListening) {
+                                                    recognitionRef.current?.stop();
+                                                    stopAudioAnalysis();
+                                                    setIsListening(false);
+                                                }
+                                                clearTimeout(pauseTimeoutRef.current);
+
+                                                // Pre-fill with current transcript so user can edit it
+                                                setTextInputValue(transcript);
+                                                setShowTextInput(true);
+                                            }}
                                             className="absolute bottom-0 w-full flex justify-center py-4 text-white/30 hover:text-white/60 text-xs font-mono border-t border-transparent hover:border-white/5 transition-all gap-2 items-center tracking-widest uppercase"
                                         >
                                             <Keyboard size={12} /> Switch to Keyboard

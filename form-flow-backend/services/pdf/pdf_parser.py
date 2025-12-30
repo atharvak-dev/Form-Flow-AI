@@ -664,10 +664,35 @@ def _parse_visual_form(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
                         if 'signature' in label.lower(): detected_type = 'signature'
 
                         # --- COORDINATE CALCULATION ---
-                        # Y: Store Top-Down coordinate (distance from top)
-                        # We use avg_top for consistency with OCR parser and pdf_writer expectation
-                        avg_top = float(sum(float(w['top']) for w in line_words) / len(line_words))
-                        pdf_y = avg_top
+                        
+                        # Find valid tokens for coordinate calculation
+                        underscore_word = next((w for w in line_words if '_' in w['text']), None)
+                        colon_word = next((w for w in reversed(line_words) if ':' in w['text']), None)
+
+                        # Precise Baseline Alignment Strategy:
+                        # 1. We want the text to sit on the line (underscore) or align with label baseline.
+                        # 2. pdfplumber 'bottom' is the distance from page top to the bottom of the character.
+                        # 3. This 'bottom' represents the visual baseline for text/lines.
+                        
+                        # Find the lowest point (max bottom) of the relevant tokens to establish baseline
+                        # If underscores exist, they define the line. If not, use label text baseline.
+                        if underscore_word:
+                             # Use the bottom of underscores as the hard baseline
+                             max_bottom = float(underscore_word['bottom'])
+                        else:
+                             # Use the bottom of the label text
+                             # We use the max bottom of the line to catch descending characters, 
+                             # but we really want the baseline.
+                             # Using the average bottom of words is usually safer for labels to avoid outliers 
+                             # (like 'g' or 'y' pushing it down too far if we just took max)
+                             max_bottom = float(sum(float(w['bottom']) for w in line_words) / len(line_words))
+                        
+                        # Set standard field height (approx font size + padding)
+                        field_height = 14.0
+                        
+                        # Calculate 'y' (top) such that 'y + height' equals the baseline 'bottom'
+                        # This ensures: page_height - (y + height) = page_height - bottom = baseline_y_from_bottom
+                        pdf_y = max_bottom - field_height
                         
                         # X: Try to find start of input area.
                         # Strategy: 
@@ -677,7 +702,6 @@ def _parse_visual_form(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
                         
                         start_x = 150.0 # Default fallback
                         
-                        underscore_word = next((w for w in line_words if '_' in w['text']), None)
                         colon_word = next((w for w in reversed(line_words) if ':' in w['text']), None)
                         
                         if underscore_word:
@@ -692,7 +716,7 @@ def _parse_visual_form(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
                         # Ensure X is not too far right
                         if start_x > 400: start_x = 400
                         
-                        logger.info(f"Field '{label}' detected at Page {page_num+1} Y={pdf_y:.2f} X={start_x:.2f}")
+                        logger.info(f"Field '{label}' detected at Page {page_num+1} Baseline={max_bottom:.2f} X={start_x:.2f}")
 
                         field = PdfField(
                             id=f"visual_field_{field_id}",
@@ -702,9 +726,9 @@ def _parse_visual_form(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
                             position=FieldPosition(
                                 page=page_num,
                                 x=start_x,
-                                y=pdf_y, # Exact Y coordinate
+                                y=pdf_y, # Top calculated from baseline
                                 width=300,
-                                height=20,
+                                height=field_height,
                             ),
                             constraints=FieldConstraints(),
                             display_name=label.title(),

@@ -298,7 +298,9 @@ class PdfFormWriter:
                         # Convert top-left (pdfplumber) to bottom-left (reportlab)
                         x = field.position.x
                         # Field Y in parser is from top. ReportLab needs from bottom.
-                        y = float(page.mediabox.height) - field.position.y - field.position.height + 5 # Small adjustment
+                        # With new parser logic: field.position.y + field.position.height = visual_baseline_from_top
+                        # ReportLab Y = PageHeight - visual_baseline_from_top
+                        y = float(page.mediabox.height) - (field.position.y + field.position.height) + 1 # +1 for visual clearance
                         
                         try:
                             can.setFont("Helvetica", 10)
