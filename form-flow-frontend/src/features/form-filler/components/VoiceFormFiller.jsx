@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Mic, MicOff, ChevronLeft, ChevronRight, SkipForward, Send, Volume2, Keyboard, Terminal, Activity, CheckCircle, Sparkles, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SiriWave } from '@/components/ui';
-import api, { API_BASE_URL, refineText, startConversationSession, sendConversationMessage } from '@/services/api';
+import api, { API_BASE_URL, refineText, startConversationSession, sendConversationMessage, confirmConversationValue } from '@/services/api';
 
 const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
     const [isListening, setIsListening] = useState(false);
@@ -43,10 +43,13 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
     const fieldMappings = {
         'fullname': 'fullname', 'yourname': 'fullname',
         'firstname': 'first_name', 'lastname': 'last_name',
-        'email': 'email', 'phone': 'mobile', 'mobile': 'mobile',
+        'email': 'email',
+        'phone': 'mobile', 'mobile': 'mobile', 'cell': 'mobile', 'contact': 'mobile',
+        'contactnumber': 'mobile', 'primarycontact': 'mobile', 'primarycontactnumber': 'mobile', 'telephone': 'mobile',
         'city': 'city', 'state': 'state', 'country': 'country',
-        'zip': 'pincode', 'pin': 'pincode', 'pincode': 'pincode',
-        'address': 'address', 'company': 'company', 'job': 'job_title'
+        'zip': 'pincode', 'pin': 'pincode', 'pincode': 'pincode', 'postal': 'pincode',
+        'address': 'address', 'company': 'company', 'job': 'job_title', 'currentrole': 'job_title',
+        'linkedin': 'linkedin_url', 'website': 'website', 'portfolio': 'website'
     };
 
     useEffect(() => { indexRef.current = currentFieldIndex; }, [currentFieldIndex]);
@@ -192,7 +195,12 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
             // Check both name and label for matches
             const cleanName = (field.name + ' ' + (field.label || '')).toLowerCase().replace(/[^a-z]/g, '');
             for (const [key, profileKey] of Object.entries(fieldMappings)) {
+                // EXCLUSION CHECK: Don't map "primary contact" to "emergency contact"
                 if (cleanName.includes(key)) {
+                    const isExcy = ['emergency', 'alternate', 'secondary', 'parent', 'guardian', 'partner', 'spouse'].some(bad => cleanName.includes(bad));
+                    if (isExcy && (key === 'phone' || key === 'mobile' || key === 'email' || key === 'fullname' || key === 'contact')) {
+                        continue;
+                    }
                     if (profile[profileKey]) autoFilled[field.name] = profile[profileKey];
                     break;
                 }
@@ -245,10 +253,53 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
         }
     };
 
-    const processVoiceInput = async (text, idx) => {
+    const processVoiceInput = async (text, idx, isDirectInput = false) => {
         if (!text || idx >= allFields.length) return;
-        setProcessing(true);
         const field = allFields[idx];
+
+        // --- OPTIMISTIC HANDLING FOR KEYBOARD INPUT ---
+        if (isDirectInput) {
+            console.log(`💪 FAST PATH: Direct input for ${field.name}: ${text}`);
+
+            // 1. Update Frontend State Immediately
+            updateField(field, text);
+            setProcessing(true); // Short pulse of processing state if needed, or skip
+
+            // 2. Sync with backend in background (don't block UI)
+            if (sessionId) {
+                sendConversationMessage(sessionId, text).then(result => {
+                    console.log("💬 Background Agent Sync:", result);
+
+                    // Optional: If agent returns a strictly formatted value (e.g. date normalization), update it
+                    if (result.extracted_values && result.extracted_values[field.name]) {
+                        const polishedValue = result.extracted_values[field.name];
+                        if (polishedValue !== text) {
+                            console.log(`✨ Refining value from "${text}" to "${polishedValue}"`);
+                            updateField(field, polishedValue);
+                        }
+                    }
+
+                    // Speak the response (confirmation + next question)
+                    if (result.response) {
+                        window.speechSynthesis.cancel();
+                        const utter = new SpeechSynthesisUtterance(result.response);
+                        // Use a good English voice if available
+                        const voices = window.speechSynthesis.getVoices();
+                        const preferredVoice = voices.find(v => v.name.includes('Google') && v.lang.includes('en')) || voices[0];
+                        if (preferredVoice) utter.voice = preferredVoice;
+                        window.speechSynthesis.speak(utter);
+                    }
+                }).catch(e => console.error("Background sync failed:", e));
+            }
+
+            // 3. Move to next field immediately
+            setProcessing(false);
+            handleNext(idx);
+            return;
+        }
+
+        // --- STANDARD VOICE FLOW ---
+        setProcessing(true);
 
         // Use Conversation Agent if session exists
         if (sessionId) {
@@ -300,6 +351,11 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
                             setCurrentFieldIndex(nextIdx);
                         }
                     }
+                } else {
+                    // Fallback check: if no specific field was returned, but we sent text, 
+                    // maybe the agent understood it as a generic confirmation. 
+                    // But for Voice, we usually act conservative.
+                    // However, we can re-evaluate this if needed.
                 }
 
             } catch (e) {
@@ -358,11 +414,25 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
             nextIdx++;
         }
 
-        if (nextIdx >= allFields.length) {
+        if (nextIdx < allFields.length) {
+            setCurrentFieldIndex(nextIdx);
+
+            // SYNC BACKEND STATE: Tell the agent we moved to a new field
+            // Use a special "system" message or just the field name as context
+            if (sessionId && allFields[nextIdx]) {
+                // We send a hidden system prompt to align the agent
+                // This prevents the "answer to Q1 being treated as answer to Q2" issue
+                const nextField = allFields[nextIdx];
+                // We don't await this, minimal impact if it fails
+                api.post('/conversation/context', {
+                    session_id: sessionId,
+                    current_field: nextField.name,
+                    field_label: nextField.label
+                }).catch(() => { });
+            }
+        } else {
             recognitionRef.current?.stop();
             onComplete?.(formDataRef.current);
-        } else {
-            setCurrentFieldIndex(nextIdx);
         }
     };
 
@@ -701,12 +771,12 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
                                                 type="text"
                                                 value={textInputValue}
                                                 onChange={(e) => setTextInputValue(e.target.value)}
-                                                onKeyDown={(e) => e.key === 'Enter' && textInputValue && processVoiceInput(textInputValue, currentFieldIndex)}
+                                                onKeyDown={(e) => e.key === 'Enter' && textInputValue && processVoiceInput(textInputValue, currentFieldIndex, true)}
                                                 placeholder="Type your answer..."
                                                 className="w-full bg-black/40 backdrop-blur-xl border border-white/10 rounded-xl px-5 py-4 text-xl text-white placeholder:text-white/20 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all font-light shadow-inner"
                                             />
                                             <button
-                                                onClick={() => textInputValue && processVoiceInput(textInputValue, currentFieldIndex)}
+                                                onClick={() => textInputValue && processVoiceInput(textInputValue, currentFieldIndex, true)}
                                                 className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-emerald-500 rounded-lg text-black hover:bg-emerald-400 shadow-lg hover:shadow-emerald-500/20 transition-all"
                                             >
                                                 <Send size={18} />

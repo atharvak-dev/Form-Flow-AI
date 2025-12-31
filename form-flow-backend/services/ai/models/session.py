@@ -493,7 +493,7 @@ class ConversationSession:
             field_attempt_counts=data.get('field_attempt_counts', {}),
             shown_milestones=set(data.get('shown_milestones', [])),
             turns_per_field=data.get('turns_per_field', {}),
-            turns_per_field=data.get('turns_per_field', {}),
+
             session_version='2.0.0',  # Upgrade to new version on load
             client_type=data.get('client_type', 'extension')
         )

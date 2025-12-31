@@ -215,6 +215,69 @@ async def confirm_value(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class ContextUpdateRequest(BaseModel):
+    """Request to update context (current field focus) without user input."""
+    session_id: str
+    current_field: str
+    field_label: Optional[str] = None
+
+
+@router.post(
+    "/context",
+    summary="Update conversation context",
+    description="Update the agent's focus on the current field (e.g. after manual skip)"
+)
+async def update_context(
+    request: ContextUpdateRequest
+):
+    """
+    Update context (current field).
+    This tells the agent which field the user is currently looking at.
+    """
+    try:
+        agent = await get_conversation_agent()
+        
+        # We need a method in conversation_agent.py to just update context
+        # without processing an answer.
+        # If it doesn't exist, we can use a workaround or add it. 
+        # For now, let's assume we can access the session and update it.
+        
+        sm = await get_session_manager()
+        session = await sm.get_session(request.session_id)
+        if not session:
+            logger.warning(f"Session {request.session_id} not found for context update")
+            return {"success": False}
+        
+        # Find the question corresponding to this field
+        # We need to set 'current_question_index' or modify the 'next_questions' queue.
+        # ConversationSession struct: current_question_index, questions list.
+        
+        # Find index of question with matching field_name
+        target_idx = -1
+        for i, q in enumerate(session.questions):
+            if q.field_name == request.current_field:
+                target_idx = i
+                break
+        
+        if target_idx != -1:
+            session.current_question_index = target_idx
+            # Also update last_interaction time
+            import datetime
+            session.updated_at = datetime.datetime.now().isoformat()
+            
+            await sm.save_session(session)
+            logger.info(f"Context updated: Session {request.session_id} -> Field {request.current_field} (Idx {target_idx})")
+        else:
+            logger.debug(f"Field {request.current_field} not found in session questions list")
+            
+        return {"success": True, "field": request.current_field}
+        
+    except Exception as e:
+        logger.error(f"Context update failed: {e}")
+        # Don't fail hard, this is a sync signal
+        return {"success": False, "error": str(e)}
+
+
 @router.get(
     "/session/{session_id}",
     response_model=SessionSummary,

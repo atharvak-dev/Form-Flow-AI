@@ -206,18 +206,14 @@ class PdfFormWriter:
             # Get form fields
             fields = reader.get_fields() or {}
             
+            # --- PHASE 1: PRIMARY FILLING ---
             if not fields:
+                # No AcroForm fields - use visual overlay directly
                 logger.warning("No AcroForm fields found. Attempting visual filling.")
                 result.warnings.append("No AcroForm fields found. Attempting visual filling.")
-                # Try visual overlay filling (modifies reader pages in-place)
                 self._fill_overlay(reader, writer, data, result)
-            
-            # Add pages to writer (now that they might be modified)
-            for page in reader.pages:
-                writer.add_page(page)
-
-            if fields:
-                # Fill each AcroForm field
+            else:
+                # Fill each AcroForm field first
                 for field_name, value in data.items():
                     field_result = self._fill_field(
                         writer=writer,
@@ -232,6 +228,33 @@ class PdfFormWriter:
                         result.warnings.append(
                             f"Field '{field_name}': {field_result.error}"
                         )
+                
+                # --- PHASE 2: HYBRID FILLING ---
+                # Identify fields that failed AcroForm filling and try Visual Overlay
+                failed_fields_map = {}
+                for res in result.field_results:
+                    if not res.success:
+                        failed_fields_map[res.field_name] = res.original_value
+                
+                if failed_fields_map:
+                    logger.info(f"Hybrid Filling: {len(failed_fields_map)} fields failed AcroForm. Attempting Visual Overlay.")
+                    self._fill_overlay(reader, writer, failed_fields_map, result)
+            
+            # --- PHASE 3: FINALIZATION ---
+            # NOW add pages to writer AFTER all overlay modifications
+            for page in reader.pages:
+                writer.add_page(page)
+
+            # Force NeedAppearances to ensure visibility
+            try:
+                if "/AcroForm" not in writer.root_object:
+                    writer.root_object[NameObject("/AcroForm")] = DictionaryObject()
+                
+                acro_form = writer.root_object["/AcroForm"]
+                if isinstance(acro_form, dict) or isinstance(acro_form, DictionaryObject):
+                     acro_form[NameObject("/NeedAppearances")] = BooleanObject(True)
+            except Exception as e:
+                logger.warning(f"Failed to set NeedAppearances: {e}")
             
             # Flatten if requested
             if flatten:
@@ -284,14 +307,22 @@ class PdfFormWriter:
         # 2. Label Match
         if field.label and field.label in data: return data[field.label]
         
-        # 3. Clean Match
-        # We want to see if any key in 'data' matches this field's label/name
-        matcher = difflib.get_close_matches
+        # 3. Robust Slug/Base Match (Ignore "field_123_" prefix)
+        # This handles case where field IDs shift between parse runs
+        import re
+        field_base = re.sub(r'^field_\d+_', '', field.name)
         
-        # check against keys
+        # Check against all data keys
+        for key, value in data.items():
+            key_base = re.sub(r'^field_\d+_', '', key)
+            if key_base == field_base:
+                return value
+        
+        # 4. Clean/Fuzzy Match (Fallback)
+        # Match field label against data keys
+        matcher = difflib.get_close_matches
         keys = list(data.keys())
         
-        # Try to match field label against data keys
         if field.label:
             matches = matcher(field.label, keys, n=1, cutoff=0.7)
             if matches: return data[matches[0]]
@@ -352,6 +383,8 @@ class PdfFormWriter:
                     val = self._find_data_for_field(field, data)
                     
                     if val:
+                        logger.info(f"Field match: '{field.name}' -> '{val}'")
+                        
                         # Value Transformation (formatting)
                         val = ValueTransformer.transform(val, field.purpose)
                         
@@ -415,6 +448,10 @@ class PdfFormWriter:
     
     def _smart_match_field(self, target_name: str, available_fields: List[str]) -> Optional[str]:
         """Find best matching field name using fuzzy logic."""
+        # Clean the target name (remove auto-generated prefixes)
+        import re
+        target_clean_base = re.sub(r'^field_\d+_', '', target_name).lower()
+
         # 1. Exact match
         if target_name in available_fields:
             return target_name
@@ -424,21 +461,32 @@ class PdfFormWriter:
         if target_name.lower() in lower_map:
             return lower_map[target_name.lower()]
             
-        # 3. Clean matching (remove special chars)
+        # 3. Clean matching (remove special chars from both)
         def clean(s): return re.sub(r'[^a-z0-9]', '', s.lower())
         target_clean = clean(target_name)
-        clean_map = {clean(f): f for f in available_fields}
-        if target_clean in clean_map:
-            return clean_map[target_clean]
+        
+        # Extended map including base name matching
+        for f in available_fields:
+            f_clean = clean(f)
+            if f_clean == target_clean: return f
+            # Match base name (e.g. "fullname" in "field_3_fullname" matches "FullName" in PDF)
+            if f_clean == clean(target_clean_base): return f
             
         # 4. Fuzzy Match (difflib)
         matches = difflib.get_close_matches(target_name, available_fields, n=1, cutoff=0.7)
-        if matches:
-            return matches[0]
-            
-        # 5. Fallback: Check containment
+        if matches: return matches[0]
+        
+        # Fuzzy match on BASE name
+        matches_base = difflib.get_close_matches(target_clean_base, [clean(f) for f in available_fields], n=1, cutoff=0.8)
+        if matches_base:
+            # Find original key for the matched base
+            for f in available_fields:
+                if clean(f) == matches_base[0]: return f
+
+        # 5. Fallback: Check containment in base name
         for f in available_fields:
-            if target_clean in clean(f) or clean(f) in target_clean:
+            f_clean = clean(f)
+            if target_clean_base in f_clean or f_clean in target_clean_base:
                 return f
                 
         return None

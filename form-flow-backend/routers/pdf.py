@@ -127,7 +127,11 @@ def _get_filled(download_id: str) -> Optional[bytes]:
 
 async def _cleanup_pdf(pdf_id: str):
     """Remove PDF from storage after timeout."""
-    await asyncio.sleep(3600)  # 1 hour delay
+    try:
+        await asyncio.sleep(3600)  # 1 hour delay
+    except asyncio.CancelledError:
+        return  # Silent exit on shutdown
+
     try:
         logger.info(f"🧹 Cleaning up upload {pdf_id}")
         (UPLOAD_DIR / f"{pdf_id}.pdf").unlink(missing_ok=True)
@@ -138,7 +142,11 @@ async def _cleanup_pdf(pdf_id: str):
 
 async def _cleanup_filled(download_id: str):
     """Remove filled PDF after timeout."""
-    await asyncio.sleep(1800)  # 30 mins delay
+    try:
+        await asyncio.sleep(1800)  # 30 mins delay
+    except asyncio.CancelledError:
+        return  # Silent exit on shutdown
+
     try:
         logger.info(f"🧹 Cleaning up download {download_id}")
         (FILLED_DIR / f"{download_id}.pdf").unlink(missing_ok=True)
