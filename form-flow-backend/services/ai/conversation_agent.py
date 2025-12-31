@@ -199,7 +199,8 @@ class ConversationAgent:
         self, 
         form_schema: List[Dict[str, Any]], 
         form_url: str = "",
-        initial_data: Dict[str, str] = None
+        initial_data: Dict[str, str] = None,
+        client_type: str = "extension"
     ) -> ConversationSession:
         """
         Create a new conversation session.
@@ -208,6 +209,7 @@ class ConversationAgent:
             form_schema: Parsed form schema from form parser
             form_url: URL of the form being filled
             initial_data: Any pre-filled data
+            client_type: 'web' or 'extension'
             
         Returns:
             ConversationSession: New session object
@@ -219,7 +221,8 @@ class ConversationAgent:
             id=str(uuid.uuid4()),
             form_schema=form_schema,
             form_url=form_url,
-            extracted_fields=initial_data or {}
+            extracted_fields=initial_data or {},
+            client_type=client_type
         )
         
         await self._save_session(session)
@@ -323,7 +326,13 @@ class ConversationAgent:
         
         # Get remaining fields and current batch
         remaining_fields = session.get_remaining_fields()
-        batches = self.clusterer.create_batches(remaining_fields)
+        
+        # Determine max fields based on client type
+        # Web frontend needs 1 field at a time to focus UI correctly
+        is_web_client = getattr(session, 'client_type', 'extension') == 'web'
+        max_fields = 1 if is_web_client else None
+        
+        batches = self.clusterer.create_batches(remaining_fields, max_fields=max_fields)
         current_batch = batches[0] if batches else []
         
         # Store current batch in session
@@ -579,7 +588,12 @@ class ConversationAgent:
         
         # 9. Generate response
         remaining_fields = session.get_remaining_fields()
-        batches = self.clusterer.create_batches(remaining_fields)
+        
+        # Determine max fields based on client type
+        is_web_client = getattr(session, 'client_type', 'extension') == 'web'
+        max_fields = 1 if is_web_client else None
+        
+        batches = self.clusterer.create_batches(remaining_fields, max_fields=max_fields)
         next_batch = batches[0] if batches else []
         
         # Check if form is complete (all required fields filled)

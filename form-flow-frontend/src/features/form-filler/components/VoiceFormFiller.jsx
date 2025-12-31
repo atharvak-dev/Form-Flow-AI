@@ -159,7 +159,8 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
                 try {
                     console.log('💬 Starting Conversation Session...');
                     // Pass the FULLY FILLED data to the agent so it doesn't ask redundant questions
-                    const sessionRes = await startConversationSession(formSchema, window.location.href, currentData);
+                    // And pass clientType='web' to ensure single-field questions
+                    const sessionRes = await startConversationSession(formSchema, window.location.href, currentData, 'web');
                     console.log('💬 Session Started:', sessionRes);
                     setSessionId(sessionRes.session_id);
                     if (sessionRes.greeting) {

@@ -70,6 +70,7 @@ class ConversationSession:
     
     # Session metadata
     session_version: str = "2.0.0"
+    client_type: str = "extension"  # 'web' or 'extension'
     
     # Legacy compatibility fields (for backward compatible constructor)
     # These are processed in __post_init__ and not used directly
@@ -124,6 +125,7 @@ class ConversationSession:
         extracted_fields: Dict[str, str] = None,
         skipped_fields: List[str] = None,
         confidence_scores: Dict[str, float] = None,
+        client_type: str = "extension",
         **kwargs
     ) -> 'ConversationSession':
         """
@@ -154,6 +156,7 @@ class ConversationSession:
             id=id,
             form_schema=form_schema,
             form_url=form_url,
+            client_type=client_type,
             _init_extracted_fields=extracted_fields,
             _init_skipped_fields=skipped_fields,
             _init_confidence_scores=confidence_scores,
@@ -400,6 +403,7 @@ class ConversationSession:
             'turns_per_field': self.turns_per_field,
             # Enhanced state (v2.0)
             'session_version': self.session_version,
+            'client_type': self.client_type,
             'form_data': safe_to_dict(self.form_data_manager),
             'inference_cache': safe_to_dict(self.inference_cache),
             'context_window': safe_to_dict(self.context_window),
@@ -489,7 +493,9 @@ class ConversationSession:
             field_attempt_counts=data.get('field_attempt_counts', {}),
             shown_milestones=set(data.get('shown_milestones', [])),
             turns_per_field=data.get('turns_per_field', {}),
-            session_version='2.0.0'  # Upgrade to new version on load
+            turns_per_field=data.get('turns_per_field', {}),
+            session_version='2.0.0',  # Upgrade to new version on load
+            client_type=data.get('client_type', 'extension')
         )
         
         # Initialize context window from schema if needed

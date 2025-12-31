@@ -47,7 +47,11 @@ class GreetingHandler:
             )
         
         # Create batches
-        batches = clusterer.create_batches(remaining_fields)
+        # Determine max fields based on client type
+        is_web_client = getattr(session, 'client_type', 'extension') == 'web'
+        max_fields = 1 if is_web_client else None
+        
+        batches = clusterer.create_batches(remaining_fields, max_fields=max_fields)
         first_batch = batches[0] if batches else [remaining_fields[0]]
         
         # Generate greeting

@@ -34,6 +34,7 @@ class CreateSessionRequest(BaseModel):
     form_schema: List[Dict[str, Any]]
     form_url: str = ""
     initial_data: Optional[Dict[str, str]] = None
+    client_type: Optional[str] = "extension"  # Defaults to 'extension' for backward compat
 
 
 class CreateSessionResponse(BaseModel):
@@ -122,7 +123,8 @@ async def create_session(
         session = await agent.create_session(
             form_schema=request.form_schema,
             form_url=request.form_url,
-            initial_data=request.initial_data
+            initial_data=request.initial_data,
+            client_type=request.client_type or "extension"
         )
         
         # Generate initial greeting

@@ -412,11 +412,12 @@ export const refineText = async (text, question = '', fieldType = '', previousQA
 /**
  * Start a new conversation session
  */
-export const startConversationSession = async (formSchema, formUrl, initialData = {}) => {
+export const startConversationSession = async (formSchema, formUrl, initialData = {}, clientType = 'web') => {
     const response = await api.post('/conversation/session', {
         form_schema: formSchema,
         form_url: formUrl,
-        initial_data: initialData
+        initial_data: initialData,
+        client_type: clientType
     });
     return response.data;
 };
