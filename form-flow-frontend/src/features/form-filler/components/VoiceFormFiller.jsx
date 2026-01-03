@@ -224,11 +224,14 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
             setTextInputValue(preFilledValue || '');
             setShowTextInput(false);
 
-            // Only play standard prompt if we don't have an active AI response regarding this field
-            // Or just play it anyway as a label?
-            playPrompt(field.name);
+            // FIX: Only play backend audio prompt when NO conversation session exists
+            // When session exists, agent's response already speaks the question via SpeechSynthesis
+            // This prevents dual TTS conflict (audio from /speech/ + SpeechSynthesis)
+            if (!sessionId) {
+                playPrompt(field.name);
+            }
         }
-    }, [currentFieldIndex, allFields, autoFilledFields]);
+    }, [currentFieldIndex, allFields, autoFilledFields, sessionId]);
 
     const playPrompt = async (fieldName) => {
         try {
@@ -281,6 +284,13 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
 
                     // Speak the response (confirmation + next question)
                     if (result.response) {
+                        // FIX: Cancel any playing prompt audio before speaking
+                        if (audioRef.current) {
+                            audioRef.current.pause();
+                            audioRef.current = null;
+                        }
+                        clearTimeout(idleTimeoutRef.current);
+
                         window.speechSynthesis.cancel();
                         const utter = new SpeechSynthesisUtterance(result.response);
                         // Use a good English voice if available
@@ -323,6 +333,13 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
 
                 // Handle AI Speech Response
                 if (result.response) {
+                    // FIX: Cancel any playing prompt audio before agent speaks
+                    if (audioRef.current) {
+                        audioRef.current.pause();
+                        audioRef.current = null;
+                    }
+                    clearTimeout(idleTimeoutRef.current);
+
                     setAiResponse(result.response);
                     window.speechSynthesis.cancel();
                     const utter = new SpeechSynthesisUtterance(result.response);
@@ -339,7 +356,20 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
 
                 // If the current field was filled, move next or jump to AI suggestion
                 if (result.extracted_values && result.extracted_values[field.name]) {
-                    setTimeout(() => handleNext(idx), 1000);
+                    // FIX: Trust agent's next_questions for field navigation instead of linear increment
+                    setTimeout(() => {
+                        if (result.next_questions?.length > 0) {
+                            const nextFieldObj = result.next_questions[0];
+                            const nextIdx = allFields.findIndex(f => f.name === nextFieldObj.name);
+                            if (nextIdx !== -1 && nextIdx !== idx) {
+                                console.log(`🦘 Agent-directed jump to: ${nextFieldObj.name} (Index ${nextIdx})`);
+                                setCurrentFieldIndex(nextIdx);
+                                return;
+                            }
+                        }
+                        // Fallback to linear handleNext if no agent suggestion
+                        handleNext(idx);
+                    }, 100); // Shorter delay since TTS is already speaking
                 } else if (result.next_questions && result.next_questions.length > 0) {
                     // AI suggested a new path/question
                     // "next_questions" is now a list of field objects: [{name: 'email', ...}]
