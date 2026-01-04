@@ -25,6 +25,7 @@ import re
 from .exceptions import PdfParsingError, PdfResourceError
 from .utils import get_logger, benchmark, PerformanceTimer
 from .domain import FieldContext, FieldGroup, GroupType, ValidationReport
+from .form_mappings import get_field_mapping, detect_form_type
 
 # PDF Libraries
 try:
@@ -122,6 +123,8 @@ class PdfField:
     display_name: Optional[str] = None  # User-friendly label
     purpose: Optional[str] = None  # Semantic purpose (email, phone, etc.)
     context: Optional[FieldContext] = None  # Rich context from surroundings
+    section: Optional[str] = None  # Form section (e.g., "Income", "Filing Status")
+    form_line: Optional[str] = None  # Form line number (e.g., "1a", "2b")
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -150,6 +153,8 @@ class PdfField:
             "font_size": self.font_size,
             "text_capacity": self.text_capacity,
             "purpose": self.purpose,
+            "section": self.section,
+            "form_line": self.form_line,
         }
 
 
@@ -599,6 +604,86 @@ def _group_fields(fields: List[PdfField]) -> List[FieldGroup]:
 # Main Parsing Functions
 # =============================================================================
 
+def _is_xfa_container(field_name: str, field_info: Dict[str, Any]) -> bool:
+    """
+    Check if a field is an XFA structural container (not a fillable field).
+    
+    XFA containers are parent nodes like 'topmostSubform[0]', 'Page1[0]', 'Table_Dependents[0]'
+    that should not be shown to users.
+    """
+    # No field type = likely a container
+    field_type = field_info.get("/FT")
+    if field_type is None:
+        return True
+    
+    # Pattern for container names: parent[index] without a field-like suffix (f1_, c1_, etc)
+    container_patterns = [
+        r'^topmostSubform\[\d+\]$',  # Root container
+        r'^topmostSubform\[\d+\]\.Page\d+\[\d+\]$',  # Page containers
+        r'_ReadOrder\[\d+\]$',  # Read order containers
+        r'^.*Row\d+\[\d+\]$',  # Table row containers
+        r'^.*Table_.*\[\d+\]$',  # Table containers
+        r'^.*Dependent\d+\[\d+\]$',  # Dependent containers (if no field type)
+    ]
+    
+    for pattern in container_patterns:
+        if re.match(pattern, field_name):
+            return True
+    
+    return False
+
+
+def _extract_form_line(field_name: str, label: str) -> Optional[str]:
+    """
+    Extract form line number (e.g., '1a', '2b') from field name or label.
+    
+    IRS forms use patterns like 'Line 1a', 'f1_01' (field 01 on page 1).
+    """
+    # Try to extract from label first: "Line 1a", "1a.", etc.
+    line_match = re.search(r'[Ll]ine\s*(\d+[a-z]?)|^(\d+[a-z]?)[\.\s]', label)
+    if line_match:
+        return line_match.group(1) or line_match.group(2)
+    
+    # Try field name patterns: f1_01, f2_15 -> "1", "15"
+    # Format: f{page}_{field_number}
+    field_match = re.search(r'f(\d)_(\d{2})\[\d+\]$', field_name)
+    if field_match:
+        page = field_match.group(1)
+        num = field_match.group(2).lstrip('0') or '0'
+        return f"{num}" if page == '1' else f"{page}-{num}"
+    
+    return None
+
+
+def _detect_section(field_name: str, label: str, page_texts: List[Dict]) -> Optional[str]:
+    """
+    Detect which section a field belongs to based on nearby text.
+    
+    Common sections: Personal Information, Filing Status, Income, Deductions, etc.
+    """
+    combined = f"{field_name} {label}".lower()
+    
+    section_keywords = {
+        "Personal Information": ["first name", "last name", "ssn", "social security", "address", "city", "state", "zip"],
+        "Filing Status": ["filing status", "single", "married", "head of household", "qualifying", "spouse"],
+        "Dependents": ["dependent", "child", "relationship"],
+        "Income": ["income", "w-2", "wages", "interest", "dividend", "ira", "pension", "social security benefits", "capital gain"],
+        "Adjustments": ["adjustment", "deduction", "ira contribution", "student loan"],
+        "Tax and Credits": ["tax", "credit", "child tax", "earned income"],
+        "Payments": ["payment", "withheld", "estimated tax"],
+        "Refund": ["refund", "overpaid", "routing", "account number"],
+        "Amount You Owe": ["amount you owe", "penalty"],
+        "Signature": ["signature", "sign here", "occupation", "preparer"],
+    }
+    
+    for section, keywords in section_keywords.items():
+        for kw in keywords:
+            if kw in combined:
+                return section
+    
+    return None
+
+
 @benchmark("parse_acroform")
 def _parse_acroform(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
     """Parse AcroForm fields from PDF."""
@@ -625,6 +710,11 @@ def _parse_acroform(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
             if not isinstance(field_info, dict):
                 continue
             
+            # Skip XFA container/structural fields
+            if _is_xfa_container(field_name, field_info):
+                continue
+
+            
             # Determine page
             page_num = 0
             if "/P" in field_info:
@@ -637,9 +727,15 @@ def _parse_acroform(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
             # Extract position
             position = _extract_field_position(field_info, page_num)
             
-            # Find label
+            # Try known form mappings first (for XFA forms with dummy positions)
+            field_mapping = get_field_mapping(field_name, "irs_1040")
+            
+            # Find label - use mapping if available, otherwise proximity-based
             page_blocks = page_texts.get(page_num, [])
-            label = _find_label_for_field(position, page_blocks)
+            if field_mapping:
+                label = field_mapping.display_name
+            else:
+                label = _find_label_for_field(position, page_blocks)
             
             # Get tooltip/alternate name as fallback label
             tooltip = field_info.get("/TU", "") or field_info.get("/T", "")
@@ -649,8 +745,8 @@ def _parse_acroform(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
             # BUILD CONTEXT
             context = FieldContext(
                 nearby_text=label,
-                instructions=str(tooltip) if tooltip else "",
-                is_required_visually=("*" in label)
+                instructions=field_mapping.help_text if field_mapping and field_mapping.help_text else str(tooltip) if tooltip else "",
+                is_required_visually=("*" in label) if label else False
             )
 
             # Extract field type (ENHANCED)
@@ -686,12 +782,26 @@ def _parse_acroform(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
             )
             if constraints.max_length:
                 text_capacity = min(text_capacity, constraints.max_length)
-            
             # Detect purpose
             purpose = _detect_purpose(field_name, label)
             
-            # Generate display name
-            display_name = label or field_name
+            # Detect section and form_line - prefer mapping, fall back to detection
+            if field_mapping:
+                section = field_mapping.section
+                form_line = field_mapping.form_line
+            else:
+                section = _detect_section(field_name, label, page_blocks)
+                form_line = _extract_form_line(field_name, label)
+            
+            # Generate display name - prefer label, fall back to cleaned field name leaf
+            if label:
+                display_name = label
+            else:
+                # Extract leaf node from XFA path for cleaner display
+                leaf_name = field_name.split('.')[-1]
+                # Remove [index] and clean up
+                leaf_name = re.sub(r'\[\d+\]', '', leaf_name)
+                display_name = leaf_name
             display_name = re.sub(r"[_\-]+", " ", display_name).strip().title()
             
             pdf_field = PdfField(
@@ -709,6 +819,8 @@ def _parse_acroform(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
                 purpose=purpose,
                 display_name=display_name,
                 context=context,
+                section=section,
+                form_line=form_line,
             )
             
             fields.append(pdf_field)
