@@ -452,6 +452,12 @@ class PdfFormWriter:
         import re
         target_clean_base = re.sub(r'^field_\d+_', '', target_name).lower()
 
+        # Helper to strip index brackets e.g., [0] from XFA paths
+        def strip_index(s): return re.sub(r'\[\d+\]', '', s)
+        
+        # Helper to get leaf node from XFA path (last segment after `.`)
+        def get_leaf(s): return strip_index(s.split('.')[-1]).lower()
+
         # 1. Exact match
         if target_name in available_fields:
             return target_name
@@ -471,8 +477,15 @@ class PdfFormWriter:
             if f_clean == target_clean: return f
             # Match base name (e.g. "fullname" in "field_3_fullname" matches "FullName" in PDF)
             if f_clean == clean(target_clean_base): return f
+        
+        # 4. XFA Leaf-Node Match: Match target against the leaf segment of each field path
+        # This handles cases like 'f1_01' matching 'topmostSubform[0].Page1[0].f1_01[0]'
+        target_leaf_clean = clean(strip_index(target_name))
+        for f in available_fields:
+            if clean(get_leaf(f)) == target_leaf_clean:
+                return f
             
-        # 4. Fuzzy Match (difflib)
+        # 5. Fuzzy Match (difflib)
         matches = difflib.get_close_matches(target_name, available_fields, n=1, cutoff=0.7)
         if matches: return matches[0]
         
@@ -483,12 +496,12 @@ class PdfFormWriter:
             for f in available_fields:
                 if clean(f) == matches_base[0]: return f
 
-        # 5. Fallback: Check containment in base name
+        # 6. Fallback: Check containment in base name
         for f in available_fields:
             f_clean = clean(f)
             if target_clean_base in f_clean or f_clean in target_clean_base:
                 return f
-                
+            
         return None
 
     def _fill_field(
