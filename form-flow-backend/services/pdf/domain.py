@@ -47,6 +47,21 @@ class FieldGroup:
     # Logic
     trigger_field: Optional[str] = None  # For conditional groups
     trigger_value: Optional[Any] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "id": self.id,
+            "group_type": self.group_type.value,  # Convert enum to string
+            "fields": self.fields,
+            "label": self.label,
+            "parent_group": self.parent_group,
+            "is_repeating": self.is_repeating,
+            "min_indices": self.min_indices,
+            "max_indices": self.max_indices,
+            "trigger_field": self.trigger_field,
+            "trigger_value": self.trigger_value,
+        }
 
 
 # =============================================================================

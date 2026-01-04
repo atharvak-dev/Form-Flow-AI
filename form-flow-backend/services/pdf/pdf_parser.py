@@ -25,7 +25,7 @@ import re
 from .exceptions import PdfParsingError, PdfResourceError
 from .utils import get_logger, benchmark, PerformanceTimer
 from .domain import FieldContext, FieldGroup, GroupType, ValidationReport
-from .form_mappings import get_field_mapping, detect_form_type
+from .xfa_parser import parse_xfa_fields, XfaField
 
 # PDF Libraries
 try:
@@ -189,7 +189,7 @@ class PdfFormSchema:
             "is_xfa": self.is_xfa,
             "is_scanned": self.is_scanned,
             "fields": [f.to_dict() for f in self.fields],
-            "groups": [g.__dict__ for g in self.groups],  # Basic dict serialization
+            "groups": [g.to_dict() for g in self.groups],  # Use to_dict for proper enum serialization
             "metadata": self.metadata,
         }
 
@@ -697,7 +697,19 @@ def _parse_acroform(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
             reader = PdfReader(str(pdf_path))
             plumber_pdf = pdfplumber.open(str(pdf_path))
         
-        # Get text blocks for label detection
+        # GENERIC XFA LABEL EXTRACTION
+        # Parse XFA template to get labels directly from PDF (no hardcoded mappings!)
+        xfa_labels = {}
+        try:
+            xfa_fields = parse_xfa_fields(pdf_path)
+            for xf in xfa_fields:
+                if xf.label:
+                    xfa_labels[xf.name] = xf
+            logger.info(f"XFA parser extracted {len(xfa_labels)} field labels")
+        except Exception as e:
+            logger.debug(f"XFA parsing skipped: {e}")
+        
+        # Get text blocks for label detection (fallback for non-XFA)
         page_texts = {}
         for i, page in enumerate(plumber_pdf.pages):
             words = page.extract_words() or []
@@ -727,13 +739,16 @@ def _parse_acroform(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
             # Extract position
             position = _extract_field_position(field_info, page_num)
             
-            # Try known form mappings first (for XFA forms with dummy positions)
-            field_mapping = get_field_mapping(field_name, "irs_1040")
+            # GENERIC: Use XFA-extracted labels (from PDF itself, not hardcoded!)
+            # Extract leaf name for lookup (e.g., "f1_01" from "topmostSubform[0].Page1[0].f1_01[0]")
+            import re as re_local
+            leaf_name = re_local.sub(r'\[\d+\]', '', field_name.split('.')[-1])
+            xfa_field = xfa_labels.get(leaf_name)
             
-            # Find label - use mapping if available, otherwise proximity-based
+            # Find label - use XFA if available, otherwise proximity-based
             page_blocks = page_texts.get(page_num, [])
-            if field_mapping:
-                label = field_mapping.display_name
+            if xfa_field and xfa_field.label:
+                label = xfa_field.label
             else:
                 label = _find_label_for_field(position, page_blocks)
             
@@ -745,7 +760,7 @@ def _parse_acroform(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
             # BUILD CONTEXT
             context = FieldContext(
                 nearby_text=label,
-                instructions=field_mapping.help_text if field_mapping and field_mapping.help_text else str(tooltip) if tooltip else "",
+                instructions=xfa_field.speak_text if xfa_field and xfa_field.speak_text else str(tooltip) if tooltip else "",
                 is_required_visually=("*" in label) if label else False
             )
 
@@ -785,13 +800,10 @@ def _parse_acroform(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
             # Detect purpose
             purpose = _detect_purpose(field_name, label)
             
-            # Detect section and form_line - prefer mapping, fall back to detection
-            if field_mapping:
-                section = field_mapping.section
-                form_line = field_mapping.form_line
-            else:
-                section = _detect_section(field_name, label, page_blocks)
-                form_line = _extract_form_line(field_name, label)
+            # Detect section and form_line using label-based detection
+            # (XFA doesn't provide section info, so we use keyword detection)
+            section = _detect_section(field_name, label, page_blocks)
+            form_line = _extract_form_line(field_name, label)
             
             # Generate display name - prefer label, fall back to cleaned field name leaf
             if label:
