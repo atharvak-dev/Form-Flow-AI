@@ -76,6 +76,9 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
         );
     }, [formSchema]);
 
+    const currentField = allFields[currentFieldIndex];
+    const progress = Math.round(((currentFieldIndex + 1) / allFields.length) * 100);
+
     // Conversation State
     const [sessionId, setSessionId] = useState(null);
     const [aiResponse, setAiResponse] = useState('');
@@ -551,9 +554,7 @@ const VoiceFormFiller = ({ formSchema, formContext, onComplete, onClose }) => {
         setVolumeLevel(0);
     };
 
-    const currentField = allFields[currentFieldIndex];
-    const progress = Math.round(((currentFieldIndex + 1) / allFields.length) * 100);
-
+    // Moved to top
     if (currentFieldIndex >= allFields.length) return null;
 
     return (
