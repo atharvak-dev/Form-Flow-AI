@@ -243,6 +243,92 @@ class TwoCaptchaClient:
         except Exception as e:
             return TwoCaptchaResult(success=False, error=str(e))
     
+    async def solve_normal(
+        self, 
+        image_base64: str,
+        numeric: int = 0,
+        min_len: int = 0,
+        max_len: int = 0,
+        phrase: int = 0,
+        case_sensitive: int = 0,
+        calc: int = 0,
+        lang: str = ''
+    ) -> TwoCaptchaResult:
+        """
+        Solve normal image CAPTCHA (base64).
+        
+        Args:
+            image_base64: Base64 encoded image content (without data:image/ type prefix)
+            numeric: 0=any, 1=numeric only, 2=alpha only, 3=any
+            min_len: Min length of text
+            max_len: Max length of text
+            phrase: 0=one word, 1=phrase
+            case_sensitive: 0=no, 1=yes
+            calc: 0=no, 1=math question
+            lang: Language code
+        """
+        import time
+        start_time = time.time()
+        
+        try:
+            session = await self._get_session()
+            
+            # Step 1: Submit task
+            params = {
+                "key": self.api_key,
+                "method": "base64",
+                "body": image_base64,
+                "json": 1,
+                "numeric": numeric,
+                "min_len": min_len,
+                "max_len": max_len,
+                "phrase": phrase,
+                "regsense": case_sensitive,
+                "calc": calc
+            }
+            if lang:
+                params["lang"] = lang
+            
+            async with session.post(f"{self.BASE_URL}/in.php", data=params) as resp:
+                result = await resp.json()
+            
+            if result.get("status") != 1:
+                return TwoCaptchaResult(
+                    success=False, 
+                    error=result.get("request", "Unknown error")
+                )
+            
+            task_id = result["request"]
+            print(f"🔄 2Captcha normal task submitted: {task_id}")
+            
+            # Step 2: Poll for result
+            poll_params = {"key": self.api_key, "action": "get", "id": task_id, "json": 1}
+            elapsed = 0
+            
+            while elapsed < self.timeout:
+                await asyncio.sleep(5)
+                elapsed += 5
+                
+                async with session.get(f"{self.BASE_URL}/res.php", params=poll_params) as resp:
+                    result = await resp.json()
+                
+                if result.get("status") == 1:
+                    solve_time = time.time() - start_time
+                    print(f"✅ 2Captcha normal solved in {solve_time:.1f}s")
+                    return TwoCaptchaResult(
+                        success=True,
+                        token=result["request"],  # For normal captcha, this is the text answer
+                        solve_time_seconds=solve_time,
+                        cost=0.001  # Normal captchas are cheaper
+                    )
+                elif result.get("request") != "CAPCHA_NOT_READY":
+                    return TwoCaptchaResult(success=False, error=result.get("request"))
+            
+            return TwoCaptchaResult(success=False, error="Timeout")
+            
+        except Exception as e:
+            return TwoCaptchaResult(success=False, error=str(e))
+
     async def get_balance(self) -> float:
         """Get account balance."""
         try:

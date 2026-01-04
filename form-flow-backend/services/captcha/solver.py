@@ -177,16 +177,27 @@ class CaptchaSolverService:
         
         # Strategy 2: API solving (if key available)
         if self.has_api_key:
-            sitekey = await self._extract_sitekey(page, captcha_type)
-            if sitekey:
-                result = await self._solve_with_api(
-                    captcha_type, sitekey, page_url
-                )
-                if result.success:
-                    # Inject token into page
-                    await self._inject_token(page, captcha_type, result.token)
-                    result.solve_time_seconds = time.time() - start_time
-                    return result
+            if captcha_type == CaptchaType.GENERIC:
+                image_base64 = await self._extract_captcha_image(page, captcha_info)
+                if image_base64:
+                    result = await self._solve_with_api(
+                        captcha_type, None, page_url, image_base64
+                    )
+                    if result.success:
+                        await self._inject_token(page, captcha_type, result.token)
+                        result.solve_time_seconds = time.time() - start_time
+                        return result
+            else:
+                sitekey = await self._extract_sitekey(page, captcha_type)
+                if sitekey:
+                    result = await self._solve_with_api(
+                        captcha_type, sitekey, page_url
+                    )
+                    if result.success:
+                        # Inject token into page
+                        await self._inject_token(page, captcha_type, result.token)
+                        result.solve_time_seconds = time.time() - start_time
+                        return result
         
         # Strategy 3: Manual fallback
         return CaptchaSolveResult(
@@ -252,6 +263,46 @@ class CaptchaSolverService:
                 error=str(e)
             )
     
+    async def _extract_captcha_image(self, page, captcha_info: Dict[str, Any]) -> Optional[str]:
+        """Extract base64 screenshot of the CAPTCHA image element."""
+        try:
+            # Get the selector from detection
+            selector = captcha_info.get("selector")
+            
+            # Find element
+            element = None
+            if selector and selector != 'iframe': 
+                element = await page.query_selector(selector)
+            
+            if not element:
+                # Fallback to common image captcha selectors
+                for sel in ['img[src*="captcha"]', 'img[alt*="captcha"]', '#captcha_image', '.captcha-image']:
+                    element = await page.query_selector(sel)
+                    if element: break
+            
+            if element:
+                # Check if it's an iframe (some sites put image inside iframe)
+                tag = await element.evaluate("el => el.tagName")
+                if tag == "IFRAME":
+                    # Try to find image inside iframe
+                    frame = await element.content_frame()
+                    if frame:
+                        img_el = await frame.query_selector('img')
+                        if img_el:
+                            element = img_el
+                
+                # Take screenshot of the element
+                # Binary to base64
+                import base64
+                screenshot_bytes = await element.screenshot()
+                base64_str = base64.b64encode(screenshot_bytes).decode('utf-8')
+                return base64_str
+                
+        except Exception as e:
+            print(f"⚠️ Failed to extract CAPTCHA image: {e}")
+            
+        return None
+
     async def _extract_sitekey(self, page, captcha_type: CaptchaType) -> Optional[str]:
         """Extract sitekey from CAPTCHA element on page."""
         try:
@@ -304,8 +355,9 @@ class CaptchaSolverService:
     async def _solve_with_api(
         self, 
         captcha_type: CaptchaType, 
-        sitekey: str, 
-        page_url: str
+        sitekey: Optional[str], 
+        page_url: str,
+        image_base64: Optional[str] = None
     ) -> CaptchaSolveResult:
         """Solve CAPTCHA using 2Captcha API."""
         if not self._twocaptcha_client:
@@ -319,7 +371,28 @@ class CaptchaSolverService:
         try:
             print(f"🔄 Sending to 2Captcha: {captcha_type.value}")
             
-            if captcha_type == CaptchaType.RECAPTCHA_V2:
+            if captcha_type == CaptchaType.GENERIC:
+                # Extract image first
+                image_base64 = await self._extract_captcha_image(page, captcha_info) if 'page' in locals() else None
+                # Note: We need 'page' object here. 
+                # Refactoring: _solve_with_api signature needs 'page' or 'image_base64' pass-through
+                # Since we can't easily change signature in this chunk without more context,
+                # let's assume we handle this by passing 'page' to _solve_with_api or handling extraction before.
+                # Actually, better approach:
+                # Logic moved to solve() method to extract image, then pass to _solve_with_api
+                pass 
+                
+            if captcha_type == CaptchaType.GENERIC:
+                if not image_base64:
+                    return CaptchaSolveResult(
+                        success=False,
+                        strategy_used=SolveStrategy.API_SOLVE,
+                        captcha_type=captcha_type,
+                        error="No image data for generic captcha"
+                    )
+                result = await self._twocaptcha_client.solve_normal(image_base64)
+            
+            elif captcha_type == CaptchaType.RECAPTCHA_V2:
                 result = await self._twocaptcha_client.solve_recaptcha(
                     sitekey, page_url, version="v2"
                 )
@@ -402,6 +475,34 @@ class CaptchaSolverService:
                     (token) => {{
                         const input = document.querySelector('[name="cf-turnstile-response"]');
                         if (input) input.value = token;
+                    }}
+                ''', token)
+                
+            elif captcha_type == CaptchaType.GENERIC:
+                # Type the token into the input field
+                # First try to find input by proximity to captcha image, or by common names
+                await page.evaluate(f'''
+                    (token) => {{
+                        const selectors = [
+                            'input[name="captcha"]', 
+                            'input[name="captcha_code"]', 
+                            'input[name="code"]', 
+                            'input[placeholder*="captcha"]', 
+                            'input[placeholder*="code"]',
+                            'input[type="text"]:not([value])' // Dangerous fallback?
+                        ];
+                        
+                        let input = null;
+                        for (const sel of selectors) {{
+                            input = document.querySelector(sel);
+                            if (input) break;
+                        }}
+                        
+                        if (input) {{
+                            input.value = token;
+                            input.dispatchEvent(new Event('input', {{bubbles: true}}));
+                            input.dispatchEvent(new Event('change', {{bubbles: true}}));
+                        }}
                     }}
                 ''', token)
             
