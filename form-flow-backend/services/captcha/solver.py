@@ -371,16 +371,7 @@ class CaptchaSolverService:
         try:
             print(f"🔄 Sending to 2Captcha: {captcha_type.value}")
             
-            if captcha_type == CaptchaType.GENERIC:
-                # Extract image first
-                image_base64 = await self._extract_captcha_image(page, captcha_info) if 'page' in locals() else None
-                # Note: We need 'page' object here. 
-                # Refactoring: _solve_with_api signature needs 'page' or 'image_base64' pass-through
-                # Since we can't easily change signature in this chunk without more context,
-                # let's assume we handle this by passing 'page' to _solve_with_api or handling extraction before.
-                # Actually, better approach:
-                # Logic moved to solve() method to extract image, then pass to _solve_with_api
-                pass 
+            
                 
             if captcha_type == CaptchaType.GENERIC:
                 if not image_base64:

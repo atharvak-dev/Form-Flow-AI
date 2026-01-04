@@ -42,18 +42,14 @@ async def test_solve_turnstile_auto_wait(mock_page):
 async def test_solve_generic_image_captcha(mock_page, mock_twocaptcha):
     # Setup solver with API key
     solver = CaptchaSolverService(twocaptcha_key="dummy_key")
+    # Mock extract image capability
+    solver._extract_captcha_image = AsyncMock(return_value="fake_base64_image")
+    
     info = {"hasCaptcha": True, "type": "generic-captcha", "selector": "#captcha_img"}
     
-    # Mock image extraction
-    # Since we can't easily mock inner helper methods without object patching, 
-    # we'll rely on mocking page queries
-    element = AsyncMock()
-    element.evaluate.return_value = "IMG" # tagName
-    element.screenshot.return_value = b"fake_image_bytes"
-    mock_page.query_selector.return_value = element
-    
+    from services.captcha.twocaptcha import TwoCaptchaResult
     # Mock 2Captcha response
-    mock_twocaptcha.solve_normal.return_value = MagicMock(
+    mock_twocaptcha.solve_normal.return_value = TwoCaptchaResult(
         success=True, 
         token="solved_text_123", 
         solve_time_seconds=1.5
@@ -67,11 +63,10 @@ async def test_solve_generic_image_captcha(mock_page, mock_twocaptcha):
     assert result.token == "solved_text_123"
     
     # Verify image extraction was called
-    mock_page.query_selector.assert_called_with("#captcha_img")
-    element.screenshot.assert_called_once()
+    solver._extract_captcha_image.assert_called_once()
     
     # Verify API called with base64
-    mock_twocaptcha.solve_normal.assert_called_once()
+    mock_twocaptcha.solve_normal.assert_called_with("fake_base64_image")
     
     # Verify token injection (typing into input)
     # The solver calls page.evaluate to find input and type
