@@ -467,18 +467,90 @@ def _extract_field_position(field_info: Dict[str, Any], page_num: int) -> FieldP
     )
 
 
+
+def _clean_label(label: str) -> str:
+    """
+    Clean up field labels by removing noise and technical artifacts.
+    """
+    if not label:
+        return ""
+        
+    # 1. Remove common instructional noise
+    noise_patterns = [
+        r'see instructions.*',
+        r'if required.*',
+        r'attach schedule.*',
+        r'go to www.*',
+        r'don\'t write in.*',
+        r'for office use.*',
+        r'paperwork reduction.*',
+        r'privacy act.*',
+        r'ommision of.*',
+        r'\(optional\)', 
+        r'\(if any\)',
+    ]
+    
+    cleaned = label
+    for pattern in noise_patterns:
+        cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+        
+    # 2. Remove internal ID patterns if they leaked into the label
+    # E.g. "topmostSubform[0]..."
+    if re.match(r'^topmostSubform\[\d+\].*', cleaned):
+        return ""
+        
+    # 3. Cleanup whitespace and punctuation
+    cleaned = cleaned.strip()
+    cleaned = cleaned.rstrip('.:,;-')
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+    
+    return cleaned.strip()
+
+
+def _is_technical_id(label: str) -> bool:
+    """
+    Check if a label looks like a technical ID/variable name rather than human text.
+    """
+    if not label: 
+        return False
+        
+    # Patterns that look like code/IDs
+    # e.g. "c1_1[0]", "f1_01", "Group1", "TextField1"
+    technical_patterns = [
+        r'^[a-z][0-9]+_[0-9]+(\[\d+\])?$',  # c1_1[0]
+        r'^[a-z]+[0-9]+(\[\d+\])?$',        # f1[0]
+        r'^topmostSubform.*',               # XFA paths
+        r'^Group\d+$',
+        r'^TextField\d+$',
+        r'^CheckBox\d+$',
+    ]
+    
+    for pattern in technical_patterns:
+        if re.match(pattern, label):
+            return True
+            
+    return False
+
+
 def _find_label_for_field(
     field_pos: FieldPosition, 
     page_text_blocks: List[Dict[str, Any]],
+    field_type: FieldType = FieldType.TEXT,
     search_radius: float = 100
 ) -> str:
     """
     Find label text near a field using proximity analysis.
     
-    Looks for text to the left of or above the field.
+    Strategies vary by field type:
+    - Checkboxes/Radios: Look Right (primary), then Left/Top.
+    - Text: Look Left (primary), then Top.
     """
     best_label = ""
     best_distance = float("inf")
+    
+    # Define search zones based on field type
+    # (x_offset, y_offset, search_dist_factor)
+    # distance logic: we want minimal distance
     
     for block in page_text_blocks:
         block_x = block.get("x0", 0)
@@ -486,25 +558,47 @@ def _find_label_for_field(
         block_x2 = block.get("x1", 0)
         block_text = block.get("text", "").strip()
         
-        if not block_text or len(block_text) > 100:  # Skip empty or too long
+        if not block_text or len(block_text) > 100:
             continue
+            
+        # 1. RIGHT SIDE SEARCH (Best for Checkboxes)
+        # Check if text is to the right of field
+        if field_type in (FieldType.CHECKBOX, FieldType.RADIO):
+            # Relaxed Y-tolerance (often text baseline is offset from box)
+            if (block_y >= field_pos.y - 12 and 
+                block_y <= field_pos.y + field_pos.height + 12 and
+                block_x >= field_pos.x + field_pos.width - 5): # Allow 5px overlap
+                
+                distance = block_x - (field_pos.x + field_pos.width)
+                if 0 < distance < 150 and distance < best_distance: # Increased range to 150
+                    best_distance = distance
+                    best_label = block_text
+                    continue # Found a good right-side candidate, keep looking for closer one
         
-        # Check if text is to the left of field (same row)
+        # 2. LEFT SIDE SEARCH (Good for Text inputs)
         if (block_y >= field_pos.y - 10 and 
             block_y <= field_pos.y + field_pos.height + 10 and
-            block_x2 < field_pos.x + 20):
+            block_x2 <= field_pos.x):
+            
             distance = field_pos.x - block_x2
-            if 0 < distance < search_radius and distance < best_distance:
-                best_distance = distance
+            # Penalize Left side for checkboxes slightly to prefer Right side if distances are similar
+            penalty = 20 if field_type in (FieldType.CHECKBOX, FieldType.RADIO) else 0
+            
+            if 0 < distance < search_radius and (distance + penalty) < best_distance:
+                best_distance = distance + penalty
                 best_label = block_text
         
-        # Check if text is above the field
+        # 3. TOP SEARCH (Fallback for Text inputs)
         elif (block_x >= field_pos.x - 20 and
               block_x <= field_pos.x + field_pos.width + 20 and
               block_y < field_pos.y):
+            
             distance = field_pos.y - block_y
-            if 0 < distance < search_radius / 2 and distance < best_distance:
-                best_distance = distance
+            # Big penalty for checkboxes (usually not labeled from above)
+            penalty = 50 if field_type in (FieldType.CHECKBOX, FieldType.RADIO) else 0
+
+            if 0 < distance < (search_radius / 2) and (distance + penalty) < best_distance:
+                best_distance = distance + penalty
                 best_label = block_text
     
     return best_label
@@ -739,35 +833,68 @@ def _parse_acroform(pdf_path: Union[str, Path, bytes]) -> List[PdfField]:
             # Extract position
             position = _extract_field_position(field_info, page_num)
             
+
             # GENERIC: Use XFA-extracted labels (from PDF itself, not hardcoded!)
             # Extract leaf name for lookup (e.g., "f1_01" from "topmostSubform[0].Page1[0].f1_01[0]")
             import re as re_local
             leaf_name = re_local.sub(r'\[\d+\]', '', field_name.split('.')[-1])
             xfa_field = xfa_labels.get(leaf_name)
             
-            # Find label - use XFA if available, otherwise proximity-based
-            page_blocks = page_texts.get(page_num, [])
-            if xfa_field and xfa_field.label:
-                label = xfa_field.label
-            else:
-                label = _find_label_for_field(position, page_blocks)
+            # Extract field type (ENHANCED) - Moved up for proximity search context
+            # We need the type to know if we should look Right (checkbox) or Left/Top (text)
+            temp_context = FieldContext(nearby_text="", instructions="")
+            field_type = _detect_field_type_enhanced(field_info, field_name, temp_context)
+            if field_type == FieldType.BUTTON:
+                continue  # Skip push buttons
             
-            # Get tooltip/alternate name as fallback label
+            # Find label strategies:
+            # 1. XFA Label (best if real human text)
+            # 2. Proximity Label (visual fallback)
+            # 3. Tooltip (fallback)
+            
+            label_candidates = []
+            
+            # Strategy A: XFA Label
+            if xfa_field and xfa_field.label:
+                label_candidates.append(xfa_field.label)
+                
+            # Strategy B: Tooltip
             tooltip = field_info.get("/TU", "") or field_info.get("/T", "")
-            if not label and tooltip:
-                label = str(tooltip)
+            if tooltip:
+                label_candidates.append(str(tooltip))
+                
+            # Strategy C: Visual Proximity
+            page_blocks = page_texts.get(page_num, [])
+            visual_label = _find_label_for_field(position, page_blocks, field_type=field_type)
+            
+            # SELECTION LOGIC
+            label = ""
+            
+            # First, check if XFA/Tooltip are "junk" (technical IDs)
+            candidate_labels = [l for l in label_candidates if l]
+            valid_candidates = [l for l in candidate_labels if not _is_technical_id(l)]
+            
+            if valid_candidates:
+                label = valid_candidates[0]
+            elif visual_label:
+                # If digital labels were junk (IDs), fallback to visual
+                label = visual_label
+            else:
+                # Last resort: use the junk label but clean it up
+                label = candidate_labels[0] if candidate_labels else ""
+                
+            # Final Cleaning
+            label = _clean_label(label)
             
             # BUILD CONTEXT
             context = FieldContext(
-                nearby_text=label,
+                nearby_text=label + (" " + visual_label if visual_label and visual_label != label else ""),
                 instructions=xfa_field.speak_text if xfa_field and xfa_field.speak_text else str(tooltip) if tooltip else "",
                 is_required_visually=("*" in label) if label else False
             )
 
-            # Extract field type (ENHANCED)
+            # Re-detect type with full context
             field_type = _detect_field_type_enhanced(field_info, field_name, context)
-            if field_type == FieldType.BUTTON:
-                continue  # Skip push buttons
 
             # Extract constraints (ENHANCED)
             constraints = _extract_validation_rules(field_info, context)
