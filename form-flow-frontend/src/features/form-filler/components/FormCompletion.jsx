@@ -164,10 +164,10 @@ const FormCompletion = ({ formData, formSchema, originalUrl, pdfId, onReset }) =
                     {/* Submission Result */}
                     {submissionResult && (
                         <div className={`p-4 rounded-xl mb-6 border flex gap-3 text-sm ${submissionResult.captcha_detected
-                                ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-200'
-                                : submissionResult.success || (submissionResult.message && !submissionResult.error)
-                                    ? 'bg-green-500/10 border-green-500/20 text-green-200'
-                                    : 'bg-red-500/10 border-red-500/20 text-red-200'
+                            ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-200'
+                            : submissionResult.success || (submissionResult.message && !submissionResult.error)
+                                ? 'bg-green-500/10 border-green-500/20 text-green-200'
+                                : 'bg-red-500/10 border-red-500/20 text-red-200'
                             }`}>
                             {submissionResult.captcha_detected ? <AlertTriangle size={18} className="text-yellow-400" /> :
                                 submissionResult.success ? <CheckCircle size={18} /> : <AlertTriangle size={18} />}

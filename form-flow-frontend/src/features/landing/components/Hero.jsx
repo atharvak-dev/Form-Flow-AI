@@ -4,6 +4,8 @@ import { PromptInputBox } from "@/components/ui/ai-prompt-box";
 import { Aurora } from "@/components/ui";
 import { HERO_AURORA_COLORS, HERO_AURORA_COLORS_DARK, HERO_TITLES } from "@/constants";
 import { useTheme } from "@/context/ThemeProvider";
+import AIStatusBadge from "@/components/AIStatusBadge";
+import CaptchaStatusBadge from "@/components/CaptchaStatusBadge";
 
 function Hero({ url, setUrl, handleSubmit, handleFileUpload, loading }) {
     const [titleNumber, setTitleNumber] = useState(0);
@@ -68,6 +70,10 @@ function Hero({ url, setUrl, handleSubmit, handleFileUpload, loading }) {
                             isLoading={loading}
                             placeholder="Paste your form URL here or attach a PDF..."
                         />
+                        <div className="flex justify-center gap-2 mt-4">
+                            <AIStatusBadge />
+                            <CaptchaStatusBadge />
+                        </div>
                     </div>
                 </div>
             </div>

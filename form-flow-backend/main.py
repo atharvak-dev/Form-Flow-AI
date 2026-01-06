@@ -257,6 +257,27 @@ async def ai_health_check():
         }
 
 
+@app.get("/health/captcha", tags=["Health"])
+async def captcha_health_check():
+    """
+    CAPTCHA solver configuration status.
+    
+    Returns:
+        dict: Whether auto-solve is configured
+    """
+    import os
+    twocaptcha_key = os.getenv("TWOCAPTCHA_API_KEY")
+    anticaptcha_key = os.getenv("ANTICAPTCHA_API_KEY")
+    
+    has_api_key = bool(twocaptcha_key or anticaptcha_key)
+    
+    return {
+        "auto_solve": has_api_key,
+        "provider": "2captcha" if twocaptcha_key else ("anticaptcha" if anticaptcha_key else None),
+        "mode": "auto" if has_api_key else "manual"
+    }
+
+
 @app.get("/metrics", tags=["Health"])
 async def metrics_dashboard():
     """

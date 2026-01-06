@@ -93,6 +93,32 @@ export const uploadDocx = async (file) => {
 };
 
 /**
+ * Get AI subsystem health status
+ * @returns {Promise<{mode, dependencies}>} - AI mode and dependency status  
+ */
+export const getAIHealth = async () => {
+    try {
+        const response = await api.get('/health/ai');
+        return response.data;
+    } catch (error) {
+        return { mode: 'unknown', error: error.message };
+    }
+};
+
+/**
+ * Get CAPTCHA solver configuration status
+ * @returns {Promise<{auto_solve, provider, mode}>}
+ */
+export const getCaptchaHealth = async () => {
+    try {
+        const response = await api.get('/health/captcha');
+        return response.data;
+    } catch (error) {
+        return { auto_solve: false, mode: 'unknown', error: error.message };
+    }
+};
+
+/**
  * Get parsed schema from an uploaded PDF
  * @param {string} pdfId - PDF ID from upload response
  * @returns {Promise<{pdf_id, file_name, fields, source}>}
