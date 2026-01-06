@@ -76,6 +76,23 @@ export const uploadPdf = async (file) => {
 };
 
 /**
+ * Upload and parse a Word document (.docx)
+ * @param {File} file - Word document to upload
+ * @returns {Promise<{success, docx_id, file_name, total_fields, fields}>}
+ */
+export const uploadDocx = async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await api.post('/docx/upload', formData, {
+        headers: {
+            'Content-Type': 'multipart/form-data',
+        },
+    });
+    return response.data;
+};
+
+/**
  * Get parsed schema from an uploaded PDF
  * @param {string} pdfId - PDF ID from upload response
  * @returns {Promise<{pdf_id, file_name, fields, source}>}

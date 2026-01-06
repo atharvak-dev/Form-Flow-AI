@@ -358,35 +358,88 @@ class VoiceProcessor:
     
     def _strengthen_password(self, password: str, requirements: dict) -> str:
         """
-        Add missing special characters if password doesn't meet requirements.
+        Generate a strong password or strengthen an existing one.
         
-        Common form requirements:
-        - At least one special character
-        - At least one number
-        - At least one uppercase letter
+        Uses cryptographically secure randomness (secrets module).
+        Guaranteed to include: uppercase, lowercase, digit, special char.
+        
+        Args:
+            password: User's spoken password (may be weak or empty)
+            requirements: Dict with optional 'min_length', 'special_char', etc.
+        
+        Returns:
+            Strong password meeting all requirements
         """
-        # Check requirements (default to True if not specified)
+        import secrets
+        import string
+        
+        # Configuration
+        min_length = requirements.get('min_length', 12)
+        max_length = requirements.get('max_length', 20)
         needs_special = requirements.get('special_char', True)
         needs_number = requirements.get('number', True)
         needs_uppercase = requirements.get('uppercase', True)
         
-        # Check what's missing
-        has_special = bool(re.search(r'[!@#$%^&*(),.?":{}|<>]', password))
+        # Check if user's password already meets requirements
+        has_special = bool(re.search(r'[!@#$%^&*(),.?":{}|<>_\-+=~`\[\]\\;\'\/]', password))
         has_number = bool(re.search(r'\d', password))
         has_uppercase = bool(re.search(r'[A-Z]', password))
+        has_lowercase = bool(re.search(r'[a-z]', password))
         
-        # Add special character if missing and needed
-        if needs_special and not has_special:
-            # Intelligent replacement: replace space with @ or add @ at end
-            if ' ' in password:
-                password = password.replace(' ', '@', 1)  # Replace only first space
-            else:
-                password = password + '@'
+        # If user's password is already strong enough, use it (respecting their choice)
+        if (len(password) >= min_length and
+            (not needs_special or has_special) and
+            (not needs_number or has_number) and
+            (not needs_uppercase or has_uppercase) and
+            has_lowercase):
+            return password
         
-        # Note: We don't auto-add numbers or uppercase as that changes the user's intended password too much
-        # The form validation will catch those if truly required
+        # If user provided a weak password or nothing, generate a strong one
+        # Character pools
+        lowercase = string.ascii_lowercase
+        uppercase = string.ascii_uppercase
+        digits = string.digits
+        special = "!@#$%^&*()_+-=[]{}|;:,.<>?"
         
-        return password
+        # Build the base character set
+        all_chars = lowercase + uppercase + digits
+        if needs_special:
+            all_chars += special
+        
+        # Determine password length (use user's length if longer than minimum)
+        length = max(min_length, len(password)) if password else min_length
+        length = min(length, max_length)  # Cap at max
+        
+        # Generate password ensuring all required character types
+        while True:
+            # Guarantee at least one of each required type
+            guaranteed_chars = [
+                secrets.choice(lowercase),  # Always need lowercase
+            ]
+            if needs_uppercase:
+                guaranteed_chars.append(secrets.choice(uppercase))
+            if needs_number:
+                guaranteed_chars.append(secrets.choice(digits))
+            if needs_special:
+                guaranteed_chars.append(secrets.choice(special))
+            
+            # Fill remaining length with random chars
+            remaining_length = length - len(guaranteed_chars)
+            random_chars = [secrets.choice(all_chars) for _ in range(remaining_length)]
+            
+            # Combine and shuffle
+            password_chars = guaranteed_chars + random_chars
+            secrets.SystemRandom().shuffle(password_chars)
+            
+            generated = ''.join(password_chars)
+            
+            # Verify it meets requirements (should always pass, but double-check)
+            if (len(generated) >= min_length and
+                bool(re.search(r'[a-z]', generated)) and
+                (not needs_uppercase or bool(re.search(r'[A-Z]', generated))) and
+                (not needs_number or bool(re.search(r'\d', generated))) and
+                (not needs_special or bool(re.search(r'[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]', generated)))):
+                return generated
 
 
 # Singleton instance

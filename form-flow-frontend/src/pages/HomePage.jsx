@@ -47,23 +47,33 @@ const HomePage = () => {
     const handleFileUpload = async (file) => {
         setLoading(true);
         try {
-            // Upload and parse the PDF
-            const response = await uploadPdf(file);
+            const fileName = file.name.toLowerCase();
+            const isDocx = fileName.endsWith('.docx') || fileName.endsWith('.doc');
+
+            // Route to appropriate endpoint based on file type
+            let response;
+            if (isDocx) {
+                const { uploadDocx } = await import('@/services/api');
+                response = await uploadDocx(file);
+            } else {
+                response = await uploadPdf(file);
+            }
 
             if (!response.success) {
                 throw new Error(response.message || 'Failed to parse document');
             }
 
-            // Check if PDF has fillable fields
+            // Check if document has fillable fields
             if (!response.fields || response.fields.length === 0) {
                 throw new Error(
-                    'This PDF has no fillable form fields. It appears to be a static document. ' +
-                    'Form Flow AI works with interactive PDF forms that have text boxes, checkboxes, or dropdowns.'
+                    isDocx
+                        ? 'No fillable placeholders found in this Word document. Try using [brackets] or ____ underscores to mark fields.'
+                        : 'This PDF has no fillable form fields. It appears to be a static document. ' +
+                        'Form Flow AI works with interactive PDF forms that have text boxes, checkboxes, or dropdowns.'
                 );
             }
 
-            // Convert PDF schema to form filler compatible format
-            // VoiceFormFiller expects formSchema as array of form groups: [{fields: [...]}]
+            // Convert schema to form filler compatible format
             const fields = response.fields.map(field => ({
                 name: field.name || field.id,
                 id: field.id || field.name,
@@ -77,11 +87,10 @@ const HomePage = () => {
             }));
 
             // Set result in the same format as web form scraping
-            // Wrap fields in array with 'fields' property to match expected structure
             setResult({
                 form_schema: [{ fields: fields }],
                 form_context: {
-                    source: 'pdf',
+                    source: isDocx ? 'docx' : 'pdf',
                     fileName: response.file_name,
                     totalPages: response.total_pages,
                     totalFields: response.total_fields,
@@ -89,8 +98,9 @@ const HomePage = () => {
                 },
             });
 
-            setPdfId(response.pdf_id); // Store for later filling
-            setScrapedUrl(`PDF: ${response.file_name}`);
+            // Store ID for later filling (pdf_id or docx_id)
+            setPdfId(response.pdf_id || response.docx_id);
+            setScrapedUrl(`${isDocx ? 'Word' : 'PDF'}: ${response.file_name}`);
             setUrl('');
 
         } catch (error) {

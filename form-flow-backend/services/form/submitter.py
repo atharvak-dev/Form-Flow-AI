@@ -1032,8 +1032,20 @@ class FormSubmitter:
             # CHECK FOR CAPTCHA
             captcha_info = self._detect_captcha_sync(page)
             if captcha_info.get('hasCaptcha'):
-                print(f"🔐 CAPTCHA detected in Sync mode! Validating manual solve required.")
-                print(f"🛑 Stopping submission to allow manual solve. Browser left OPEN.")
+                import os
+                has_api_key = bool(os.getenv("TWOCAPTCHA_API_KEY"))
+                
+                logger.warning(f"🔐 CAPTCHA detected: {captcha_info.get('type', 'unknown')}")
+                
+                if has_api_key:
+                    # API key exists but sync mode can't use async solver
+                    logger.info("💡 TIP: CAPTCHA API key found but sync mode requires manual solving.")
+                    logger.info("   The async path (non-Windows) uses 2Captcha automatically.")
+                else:
+                    logger.info("💡 TIP: Set TWOCAPTCHA_API_KEY env variable to auto-solve CAPTCHAs.")
+                    logger.info("   Get your API key at https://2captcha.com")
+                
+                print(f"🛑 Browser left OPEN for manual CAPTCHA solving.")
                 
                 # Do NOT close browser/playwright here
                 return {

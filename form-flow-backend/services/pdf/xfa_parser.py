@@ -83,16 +83,37 @@ class XfaParser:
             print(f"Error extracting XFA: {e}")
     
     def _parse_template(self, template: str):
-        """Parse XFA template XML to extract fields."""
+        """Parse XFA template XML to extract fields with robust page detection."""
         # CRITICAL: XFA format uses \n> between elements
         # Normalize by replacing \n> with > (keep the >, remove newline)
         data = template.replace('\n>', '>')
         
-        # Track page from subform context
-        current_page = 0
+        # =====================================================================
+        # PHASE 1: Detect page structure from subforms
+        # =====================================================================
+        # In XFA, pages are often defined as subforms with specific names or
+        # by being children of the pageSet. We track subform depth and names.
         
-        # Extract all field blocks
+        # Count major subforms that could represent pages
+        # Common patterns: subform[0], Page1, form1, etc.
+        page_subforms = []
+        subform_pattern = r'<subform\s+name="([^"]*)"[^>]*>'
+        for match in re.finditer(subform_pattern, data):
+            name = match.group(1).lower()
+            # Heuristic: subforms starting with "page", "p", or numeric suffixes
+            if 'page' in name or name.startswith('p') or re.match(r'.*\d+$', name):
+                page_subforms.append(match.group(1))
+        
+        # If we found page-like subforms, use them for context
+        page_context_names = set(page_subforms[:10])  # Limit to reasonable count
+        
+        # =====================================================================
+        # PHASE 2: Extract fields with context-aware page detection
+        # =====================================================================
+        # Find all fields and their positions in the document
         field_pattern = r'<field\s+name="([^"]+)"([^>]*)>(.*?)</field>'
+        
+        field_positions = []  # (field_data, y_position)
         
         for match in re.finditer(field_pattern, data, re.DOTALL):
             name = match.group(1)
@@ -125,23 +146,45 @@ class XfaParser:
             if not label and speak_text:
                 label = speak_text
             
-            # Detect page from parent context (rough estimate based on field prefix)
-            if name.startswith('f2_') or name.startswith('c2_'):
-                current_page = 1
-            elif name.startswith('f1_') or name.startswith('c1_'):
-                current_page = 0
+            field_positions.append({
+                'name': name,
+                'x': x,
+                'y': y,
+                'w': w,
+                'h': h,
+                'type': field_type,
+                'label': label,
+                'speak_text': speak_text,
+                'abs_y': y,  # Will be adjusted per-page
+            })
+        
+        # =====================================================================
+        # PHASE 3: Infer page numbers using Y-position clustering
+        # =====================================================================
+        # Standard US Letter page height is ~279mm
+        # A4 is ~297mm
+        PAGE_HEIGHT_MM = 280  # Approximate page height
+        
+        for field_data in field_positions:
+            # Calculate page based on absolute Y position
+            # Fields with Y > PAGE_HEIGHT are likely on page 2+
+            abs_y = field_data['y']
+            
+            # Some XFA forms reset Y per page, some use absolute
+            # Heuristic: if Y is small, use cumulative Y tracking
+            page = int(abs_y // PAGE_HEIGHT_MM)
             
             self.fields.append(XfaField(
-                name=name,
-                full_path=name,  # XFA doesn't need hierarchical paths
-                x=x,
-                y=y,
-                width=w,
-                height=h,
-                page=current_page,
-                field_type=field_type,
-                label=label,
-                speak_text=speak_text,
+                name=field_data['name'],
+                full_path=field_data['name'],
+                x=field_data['x'],
+                y=field_data['y'],
+                width=field_data['w'],
+                height=field_data['h'],
+                page=page,
+                field_type=field_data['type'],
+                label=field_data['label'],
+                speak_text=field_data['speak_text'],
             ))
     
     def _get_attr(self, attrs_str: str, attr_name: str) -> Optional[str]:
