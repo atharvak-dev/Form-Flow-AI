@@ -1,0 +1,338 @@
+================================================================================
+                        FORM FLOW AI - COMPLETE SETUP GUIDE
+================================================================================
+
+This guide covers everything you need to set up Form Flow AI, including:
+- Basic installation (frontend + backend)
+- Local AI model configuration (Phi-2 LLM + Vosk Speech Recognition)
+- Docker deployment options
+- Troubleshooting
+
+================================================================================
+                              PREREQUISITES
+================================================================================
+
+Required Software:
+------------------
+| Software    | Version | Download URL                        |
+|-------------|---------|-------------------------------------|
+| Python      | 3.10+   | https://www.python.org/downloads/   |
+| Node.js     | 18+     | https://nodejs.org/                 |
+| Git         | Latest  | https://git-scm.com/                |
+
+Optional (for GPU acceleration):
+--------------------------------
+| Software       | Notes                                      |
+|----------------|---------------------------------------------|
+| CUDA Toolkit   | 11.8+ for NVIDIA GPU acceleration          |
+| NVIDIA GPU     | 6GB+ VRAM recommended for Phi-2 model      |
+
+================================================================================
+                         STEP 1: CLONE THE REPOSITORY
+================================================================================
+
+Open a terminal and run:
+
+    git clone https://github.com/your-username/Form-Flow-AI.git
+    cd Form-Flow-AI
+
+================================================================================
+                          STEP 2: BACKEND SETUP
+================================================================================
+
+2.1 Create Python Virtual Environment
+--------------------------------------
+    cd form-flow-backend
+
+    # Create virtual environment
+    python -m venv .venv
+
+    # Activate it:
+    # Windows:
+    .venv\Scripts\activate
+
+    # Linux/Mac:
+    source .venv/bin/activate
+
+2.2 Install Python Dependencies
+--------------------------------
+    pip install -r requirements.txt
+
+2.3 Install Playwright Browser (for form automation)
+-----------------------------------------------------
+    playwright install chromium
+
+2.4 Configure Environment Variables
+------------------------------------
+Copy the example environment file and configure it:
+
+    # Windows:
+    copy .env.example .env
+
+    # Linux/Mac:
+    cp .env.example .env
+
+Edit the .env file with your settings:
+
+    # ============ REQUIRED ============
+    # At least ONE LLM API key is required
+    GOOGLE_API_KEY=your_gemini_api_key_here
+    
+    # Security key (generate a random string)
+    SECRET_KEY=your_super_secret_key_here
+
+    # ============ OPTIONAL ============
+    # Alternative LLM provider
+    OPENAI_API_KEY=your_openai_api_key_here
+
+    # Enhanced speech services
+    DEEPGRAM_API_KEY=your_deepgram_api_key_here
+    ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
+
+    # Redis for caching (production)
+    REDIS_URL=redis://localhost:6379
+
+    # CORS settings
+    CORS_ORIGINS=http://localhost:5173,http://localhost:3000
+
+Where to get API keys:
+    - Gemini: https://aistudio.google.com/
+    - OpenAI: https://platform.openai.com/
+    - Deepgram: https://console.deepgram.com/
+    - ElevenLabs: https://elevenlabs.io/
+
+2.5 Start the Backend Server
+-----------------------------
+    uvicorn main:app --reload
+
+    Backend will be running at: http://localhost:8000
+    API Documentation at: http://localhost:8000/docs
+
+================================================================================
+                          STEP 3: FRONTEND SETUP
+================================================================================
+
+Open a NEW terminal window:
+
+    cd form-flow-frontend
+
+    # Install Node.js dependencies
+    npm install
+
+    # Start the development server
+    npm run dev
+
+    Frontend will be running at: http://localhost:5173
+
+================================================================================
+                    STEP 4: LOCAL AI MODELS (OPTIONAL)
+================================================================================
+
+Form Flow AI can run entirely offline using local AI models. This provides:
+- Complete privacy (no data sent to cloud)
+- No API costs
+- Works without internet
+
+4.1 VOSK SPEECH RECOGNITION MODEL (Offline Speech-to-Text)
+-----------------------------------------------------------
+
+The Vosk model enables offline speech transcription for voice input.
+
+Download the model:
+    1. Go to: https://alphacephei.com/vosk/models
+    2. Download "vosk-model-small-en-in-0.4" (Indian English, ~40MB)
+       OR "vosk-model-en-us-0.22" (US English, ~128MB)
+    3. Extract the ZIP file
+
+Place the model folder in the project root:
+
+    Form-Flow-AI/
+    ├── vosk-model-small-en-in-0.4/   <-- Extract here
+    │   ├── am/
+    │   ├── conf/
+    │   ├── graph/
+    │   └── ...
+    ├── form-flow-backend/
+    └── form-flow-frontend/
+
+The backend will automatically detect the Vosk model at startup.
+You'll see: "✅ Vosk model loaded successfully"
+
+4.2 PHI-2 LOCAL LLM (Offline Text Generation)
+----------------------------------------------
+
+Phi-2 is a small but capable language model for local inference.
+
+Requirements:
+    - ~6GB disk space
+    - ~4GB RAM (CPU) or 4GB VRAM (GPU)
+    - GPU recommended for faster inference
+
+Option A: Automatic Download (Recommended)
+------------------------------------------
+Run the download script from the project root:
+
+    python download_models.py
+
+This will download the Phi-2 model to: Form-Flow-AI/models/phi-2/
+(Download size: ~5.6GB)
+
+Option B: Manual Download
+-------------------------
+    1. Go to: https://huggingface.co/microsoft/phi-2
+    2. Click "Files and versions"
+    3. Download all files
+    4. Place them in Form-Flow-AI/models/phi-2/
+
+Directory structure should be:
+
+    Form-Flow-AI/
+    ├── models/
+    │   └── phi-2/
+    │       ├── config.json
+    │       ├── model.safetensors (or pytorch_model.bin)
+    │       ├── tokenizer.json
+    │       ├── tokenizer_config.json
+    │       └── ...
+    ├── form-flow-backend/
+    └── form-flow-frontend/
+
+The backend will automatically use the local model when available.
+You'll see: "✅ Using LOCAL model: .../models/phi-2"
+
+GPU vs CPU Mode:
+    - GPU (NVIDIA + CUDA): ~10x faster, loads with 4-bit quantization
+    - CPU: Slower but works without GPU, uses ~4GB RAM
+
+================================================================================
+                        STEP 5: DOCKER DEPLOYMENT
+================================================================================
+
+5.1 Standard Docker Setup (with cloud APIs)
+--------------------------------------------
+
+    # From project root
+    docker-compose up --build
+
+This starts:
+    - Backend at http://localhost:8000
+    - Frontend at http://localhost:3000
+    - PostgreSQL database
+    - Redis cache
+
+Environment variables should be set in .env or passed to docker-compose.
+
+5.2 Local LLM Docker Setup (fully offline)
+-------------------------------------------
+
+For a completely offline setup with local models:
+
+    # First, download models as described in Step 4
+    python download_models.py
+
+    # Then run with local LLM docker-compose
+    docker-compose -f docker-compose.local-llm.yml up --build
+
+This configuration:
+    - Mounts the models/ directory into the container
+    - Uses GPU passthrough if available (NVIDIA)
+    - Works without any API keys
+
+NOTE: GPU passthrough requires:
+    - Docker with NVIDIA Container Toolkit
+    - nvidia-docker2 installed
+    - CUDA-capable GPU
+
+================================================================================
+                         VERIFICATION CHECKLIST
+================================================================================
+
+After setup, verify everything is working:
+
+[ ] 1. Backend running at http://localhost:8000
+       Test: Open http://localhost:8000/health in browser
+
+[ ] 2. Frontend running at http://localhost:5173
+       Test: Open http://localhost:5173 in browser
+
+[ ] 3. API docs accessible
+       Test: Open http://localhost:8000/docs in browser
+
+[ ] 4. (Optional) Vosk model loaded
+       Check backend logs for: "✅ Vosk model loaded successfully"
+
+[ ] 5. (Optional) Local LLM loaded
+       Check backend logs for: "✅ Using LOCAL model: .../models/phi-2"
+
+================================================================================
+                            TROUBLESHOOTING
+================================================================================
+
+Problem: "playwright install" fails
+Solution: Run as administrator or with --with-deps flag
+    playwright install --with-deps chromium
+
+Problem: Backend won't start / ModuleNotFoundError
+Solution: Ensure virtual environment is activated and dependencies installed
+    .venv\Scripts\activate  (Windows)
+    pip install -r requirements.txt
+
+Problem: CORS errors in browser
+Solution: Add your frontend URL to CORS_ORIGINS in .env
+    CORS_ORIGINS=http://localhost:5173,http://localhost:3000
+
+Problem: Port already in use
+Solution: Change the port
+    uvicorn main:app --reload --port 8001
+
+Problem: Vosk model not loading
+Solution: Check the model path and folder structure
+    - Model folder should be in project root
+    - Folder name should match exactly: vosk-model-small-en-in-0.4
+
+Problem: Local LLM slow / out of memory
+Solution: 
+    - CPU mode uses ~4GB RAM, close other apps
+    - Consider using smaller model or cloud API fallback
+
+Problem: CUDA/GPU not detected
+Solution:
+    - Install CUDA Toolkit 11.8+
+    - Install PyTorch with CUDA: pip install torch --index-url https://download.pytorch.org/whl/cu118
+    - Verify: python -c "import torch; print(torch.cuda.is_available())"
+
+================================================================================
+                            QUICK START COMMANDS
+================================================================================
+
+# Full setup from scratch (copy and run in order):
+
+cd Form-Flow-AI
+
+# Backend
+cd form-flow-backend
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+playwright install chromium
+copy .env.example .env
+# (Edit .env with your API keys)
+uvicorn main:app --reload
+
+# Frontend (new terminal)
+cd form-flow-frontend
+npm install
+npm run dev
+
+# Optional: Download local models
+python download_models.py
+
+================================================================================
+                              NEED HELP?
+================================================================================
+
+- GitHub Issues: https://github.com/your-username/Form-Flow-AI/issues
+- API Documentation: http://localhost:8000/docs (when backend is running)
+- Check logs in terminal for detailed error messages
+
+================================================================================

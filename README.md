@@ -337,39 +337,128 @@ flowchart TD
 
 ---
 
-## 🚀 Setup & Configuration
+## 🚀 Complete Setup Guide
 
-### Environment Variables (`.env`)
-```ini
-DATABASE_URL=sqlite:///./sql_app.db
-SECRET_KEY=your_secret_key_here
-GEMINI_API_KEY=your_gemini_key_here
-# Optional for Production:
-# DEEPGRAM_API_KEY=sk-xxx
-# ELEVENLABS_API_KEY=xi-xxx
+> 📄 **Full Setup Guide**: See [`SETUP_GUIDE.txt`](SETUP_GUIDE.txt) for detailed instructions including troubleshooting.
+
+### Prerequisites
+
+| Software | Version | Download |
+|----------|---------|----------|
+| Python | 3.10+ | [python.org](https://www.python.org/downloads/) |
+| Node.js | 18+ | [nodejs.org](https://nodejs.org/) |
+| Git | Latest | [git-scm.com](https://git-scm.com/) |
+
+### Step 1: Clone & Configure
+
+```bash
+git clone https://github.com/your-username/Form-Flow-AI.git
+cd Form-Flow-AI
 ```
 
-### Installation
+### Step 2: Backend Setup
 
-**1. Backend Setup**
 ```bash
 cd form-flow-backend
+
+# Create virtual environment
 python -m venv .venv
-# Windows:
+
+# Activate (Windows)
 .venv\Scripts\activate
-# Linux/Mac:
+# Activate (Linux/Mac)
 # source .venv/bin/activate
 
+# Install dependencies
 pip install -r requirements.txt
 playwright install chromium
+
+# Configure environment
+copy .env.example .env  # Windows
+# cp .env.example .env  # Linux/Mac
+
+# Start server
 uvicorn main:app --reload
 ```
 
-**2. Frontend Setup**
+Edit `.env` with your API keys:
+```ini
+# Required - At least one LLM API key
+GOOGLE_API_KEY=your_gemini_api_key_here
+SECRET_KEY=your_super_secret_key_here
+
+# Optional - Enhanced features
+OPENAI_API_KEY=your_openai_api_key_here
+DEEPGRAM_API_KEY=your_deepgram_api_key_here
+ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
+```
+
+> 💡 **Get API Keys**: [Google AI Studio](https://aistudio.google.com/) | [OpenAI](https://platform.openai.com/) | [Deepgram](https://console.deepgram.com/) | [ElevenLabs](https://elevenlabs.io/)
+
+### Step 3: Frontend Setup
+
 ```bash
 cd form-flow-frontend
 npm install
 npm run dev
+```
+
+✅ **Frontend**: http://localhost:5173  
+✅ **Backend**: http://localhost:8000  
+✅ **API Docs**: http://localhost:8000/docs
+
+---
+
+## 🤖 Local AI Models (Offline Mode)
+
+Run Form Flow AI completely offline with local models for maximum privacy and zero API costs.
+
+### Vosk Speech Recognition
+
+Download and extract to project root:
+```bash
+# Download from: https://alphacephei.com/vosk/models
+# Recommended: vosk-model-small-en-in-0.4 (~40MB)
+
+Form-Flow-AI/
+├── vosk-model-small-en-in-0.4/  # Extract here
+│   ├── am/
+│   ├── conf/
+│   └── ...
+```
+
+### Phi-2 Local LLM
+
+```bash
+# From project root
+python download_models.py
+```
+
+This downloads Microsoft's Phi-2 model (~5.6GB) to `models/phi-2/`.
+
+**Requirements:**
+- ~6GB disk space
+- ~4GB RAM (CPU) or 4GB VRAM (GPU)
+- GPU recommended for 10x faster inference
+
+---
+
+## 🐳 Docker Deployment
+
+### Standard (Cloud APIs)
+```bash
+docker-compose up --build
+```
+- Backend: http://localhost:8000
+- Frontend: http://localhost:3000
+
+### Local LLM Mode (Fully Offline)
+```bash
+# Download models first
+python download_models.py
+
+# Run with local LLM
+docker-compose -f docker-compose.local-llm.yml up --build
 ```
 
 ---
