@@ -163,15 +163,28 @@ const FormCompletion = ({ formData, formSchema, originalUrl, pdfId, onReset }) =
 
                     {/* Submission Result */}
                     {submissionResult && (
-                        <div className={`p-4 rounded-xl mb-6 border flex gap-3 text-sm ${submissionResult.success || (submissionResult.message && !submissionResult.error)
-                            ? 'bg-green-500/10 border-green-500/20 text-green-200'
-                            : 'bg-red-500/10 border-red-500/20 text-red-200'
+                        <div className={`p-4 rounded-xl mb-6 border flex gap-3 text-sm ${submissionResult.captcha_detected
+                                ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-200'
+                                : submissionResult.success || (submissionResult.message && !submissionResult.error)
+                                    ? 'bg-green-500/10 border-green-500/20 text-green-200'
+                                    : 'bg-red-500/10 border-red-500/20 text-red-200'
                             }`}>
-                            {submissionResult.success ? <CheckCircle size={18} /> : <AlertTriangle size={18} />}
+                            {submissionResult.captcha_detected ? <AlertTriangle size={18} className="text-yellow-400" /> :
+                                submissionResult.success ? <CheckCircle size={18} /> : <AlertTriangle size={18} />}
                             <div>
-                                <strong>{submissionResult.success ? 'Success' : 'Submission Alert'}: </strong>
-                                {submissionResult.message}
-                                {submissionResult.error && (
+                                <strong>
+                                    {submissionResult.captcha_detected ? 'Action Required' :
+                                        submissionResult.success ? 'Success' : 'Submission Alert'}:
+                                </strong>
+                                <span className="ml-1">{submissionResult.message}</span>
+
+                                {submissionResult.captcha_detected && (
+                                    <div className="mt-2 text-xs bg-yellow-500/20 p-2 rounded border border-yellow-500/10">
+                                        The browser window has been left open. Please solve the CAPTCHA manually and submit the form there.
+                                    </div>
+                                )}
+
+                                {submissionResult.error && !submissionResult.captcha_detected && (
                                     <div className="mt-1 opacity-80 text-xs font-mono bg-black/20 p-2 rounded">
                                         {JSON.stringify(submissionResult.error)}
                                     </div>

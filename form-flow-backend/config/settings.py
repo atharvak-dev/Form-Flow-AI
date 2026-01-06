@@ -134,7 +134,7 @@ class Settings(BaseSettings):
     # Smart Question Engine Configuration
     # ==========================================================================
     SMART_GROUPING_ENABLED: bool = Field(
-        default=False,
+        default=True,
         description="Enable Smart Question Grouping (reduces 159 fields to ~30 groups)"
     )
     SMART_GROUPING_MIN_FILL_RATIO: float = Field(

@@ -11,6 +11,7 @@ from .browser_pool import get_browser_context
 
 # Import CAPTCHA detection and solving
 from .detectors.captcha import detect_captcha
+from .utils.constants import CAPTCHA_SELECTORS
 from services.captcha.solver import CaptchaSolverService, get_captcha_solver
 
 
@@ -980,66 +981,143 @@ class FormSubmitter:
         is_google = 'docs.google.com/forms' in url
         
         try:
-            with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(
-                    headless=False,
-                    args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-                )
-                context = browser.new_context(
-                    viewport={'width': 1280, 'height': 800},
-                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36'
-                )
-                page = context.new_page()
+            # Manual lifecycle management to keep browser open on CAPTCHA
+            playwright = sync_playwright().start()
+            browser = playwright.chromium.launch(
+                headless=False,
+                args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            )
+            context = browser.new_context(
+                viewport={'width': 1280, 'height': 800},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36'
+            )
+            page = context.new_page()
+            
+            print(f"🌐 Navigating to form: {url}")
+            page.goto(url, wait_until='domcontentloaded', timeout=60000)
+            
+            # Wait for form load
+            if is_google:
+                try:
+                    page.wait_for_selector('[role="listitem"], .freebirdFormviewerViewItemsItemItem', timeout=20000)
+                    time.sleep(2)
+                except:
+                    pass
+            else:
+                try:
+                    page.wait_for_load_state("networkidle", timeout=15000)
+                except:
+                    pass
+                time.sleep(1)
+            
+            initial_url = page.url
+            
+            # Fill form
+            fill_result = self._sync_fill_form(page, form_data, form_schema, is_google)
+            
+            # CHECK FOR CAPTCHA
+            captcha_info = self._detect_captcha_sync(page)
+            if captcha_info.get('hasCaptcha'):
+                print(f"🔐 CAPTCHA detected in Sync mode! Validating manual solve required.")
+                print(f"🛑 Stopping submission to allow manual solve. Browser left OPEN.")
                 
-                print(f"🌐 Navigating to form: {url}")
-                page.goto(url, wait_until='domcontentloaded', timeout=60000)
-                
-                # Wait for form load
-                if is_google:
-                    try:
-                        page.wait_for_selector('[role="listitem"], .freebirdFormviewerViewItemsItemItem', timeout=20000)
-                        time.sleep(2)
-                    except:
-                        pass
-                else:
-                    try:
-                        page.wait_for_load_state("networkidle", timeout=15000)
-                    except:
-                        pass
-                    time.sleep(1)
-                
-                initial_url = page.url
-                
-                # Fill form using sync methods
-                fill_result = self._sync_fill_form(page, form_data, form_schema, is_google)
-                
-                # Submit form
-                submit_ok = self._sync_submit_form(page, form_schema, is_google)
-                time.sleep(2)
-                
-                # Validate
-                page_content = page.content().lower()
-                current_url = page.url
-                
-                # Simple success validation
-                success_indicators = ['thank you', 'success', 'submitted', 'received', 'confirmation']
-                likely_success = any(ind in page_content for ind in success_indicators) or current_url != initial_url
-                
-                browser.close()
-                
+                # Do NOT close browser/playwright here
                 return {
-                    "success": likely_success and not fill_result.get("errors"),
-                    "captcha_detected": False,
-                    "message": "Form submitted successfully" if likely_success else "Form submission completed with issues",
-                    "submission_result": fill_result,
-                    "validation_result": {"likely_success": likely_success}
+                    "success": False,
+                    "captcha_detected": True,
+                    "browser_left_open": True,
+                    "message": "CAPTCHA detected. Please solve manually in the open browser window.",
+                    "submission_result": fill_result
                 }
-                
+            
+            # Submit form (Only if no CAPTCHA)
+            submit_ok = self._sync_submit_form(page, form_schema, is_google)
+            time.sleep(2)
+            
+            # Validate
+            page_content = page.content().lower()
+            current_url = page.url
+            
+            # Simple success validation
+            success_indicators = ['thank you', 'success', 'submitted', 'received', 'confirmation']
+            likely_success = any(ind in page_content for ind in success_indicators) or current_url != initial_url
+            
+            # Cleanup only on success/failure (not captcha)
+            browser.close()
+            playwright.stop()
+            
+            return {
+                "success": likely_success and not fill_result.get("errors"),
+                "captcha_detected": False,
+                "message": "Form submitted successfully" if likely_success else "Form submission completed with issues",
+                "submission_result": fill_result,
+                "validation_result": {"likely_success": likely_success}
+            }
+            
         except Exception as e:
             import traceback
             traceback.print_exc()
             return {"success": False, "error": str(e), "message": "Form submission failed"}
     
+    def _detect_captcha_sync(self, page) -> Dict[str, Any]:
+        """Detect CAPTCHA using sync Playwright API."""
+        import json
+        
+        # Inject detection logic
+        selectors_js = json.dumps(CAPTCHA_SELECTORS)
+        
+        result = page.evaluate(f"""
+            () => {{
+                const captchaIndicators = {selectors_js};
+                
+                // Helper function to check if element is visible
+                const isVisible = (el) => {{
+                    if (!el) return false;
+                    const style = window.getComputedStyle(el);
+                    const rect = el.getBoundingClientRect();
+                    return style.display !== 'none' && 
+                           style.visibility !== 'hidden' && 
+                           rect.width > 0 && 
+                           rect.height > 0;
+                }};
+                
+                for (const selector of captchaIndicators) {{
+                    try {{
+                        const elements = document.querySelectorAll(selector);
+                        for (const el of elements) {{
+                            if (isVisible(el)) {{
+                                return {{
+                                    hasCaptcha: true,
+                                    type: 'captcha',
+                                    selector: selector,
+                                    message: 'CAPTCHA detected'
+                                }};
+                            }}
+                        }}
+                    }} catch(e) {{}}
+                }}
+                
+                // Iframe check
+                const iframes = document.querySelectorAll('iframe');
+                for (const iframe of iframes) {{
+                    const src = (iframe.src || '').toLowerCase();
+                    const title = (iframe.title || '').toLowerCase();
+                    if (src.includes('captcha') || src.includes('recaptcha') || src.includes('hcaptcha') || src.includes('turnstile') ||
+                        title.includes('captcha') || title.includes('recaptcha') || title.includes('challenge')) {{
+                        return {{
+                            hasCaptcha: true,
+                            type: 'iframe_captcha',
+                            selector: 'iframe',
+                            message: 'CAPTCHA iframe detected'
+                        }};
+                    }}
+                }}
+                
+                return {{ hasCaptcha: false }};
+            }}
+        """)
+        return result
+
     def _sync_fill_form(self, page, form_data: Dict[str, str], form_schema: List[Dict], is_google: bool) -> Dict[str, Any]:
         """Sync form filling for Windows."""
         filled, errors = [], []
