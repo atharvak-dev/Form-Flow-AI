@@ -270,10 +270,29 @@ class LocalLLMService:
         
         normalized = user_input
         
-        # Email normalization
+        # Email normalization - handle spoken patterns like "Atharva Karwal @ gmail.com"
+        # Step 1: Replace "at the rate" with @
         normalized = re.sub(r'\bat\s+the\s+rate\b', '@', normalized, flags=re.IGNORECASE)
+        
+        # Step 2: Replace " at " with @ (common spoken pattern)
         normalized = re.sub(r'\s+at\s+', '@', normalized)
+        
+        # Step 3: Replace " dot " with .
         normalized = re.sub(r'\s+dot\s+', '.', normalized, flags=re.IGNORECASE)
+        
+        # Step 4: Handle spoken email patterns like "name name @ domain.com"
+        # Find patterns where there are words before @ and after @
+        # e.g., "Atharva Karwal @ gmail.com" -> "atharvakarwal@gmail.com"
+        email_spoken_pattern = re.search(
+            r'([A-Za-z]+(?:\s+[A-Za-z]+)*)\s*@\s*([A-Za-z0-9.-]+\.[A-Za-z]{2,})',
+            normalized
+        )
+        if email_spoken_pattern:
+            username_part = email_spoken_pattern.group(1).replace(' ', '').lower()
+            domain_part = email_spoken_pattern.group(2).lower()
+            reconstructed_email = f"{username_part}@{domain_part}"
+            # Replace the original spoken pattern with the normalized email
+            normalized = normalized[:email_spoken_pattern.start()] + reconstructed_email + normalized[email_spoken_pattern.end():]
         
         # Number word to digit (for phone numbers in speech)
         number_words = {
