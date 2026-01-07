@@ -197,6 +197,9 @@ class LocalLLMService:
         if "\n" in extracted:
             extracted = extracted.split("\n")[0].strip()
         
+        return {
+            "value": extracted,
+            "confidence": min(0.9, len(extracted) / 10) if extracted else 0.1,
             "source": "local_llm"
         }
 
