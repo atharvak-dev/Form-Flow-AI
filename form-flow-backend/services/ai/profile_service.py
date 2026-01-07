@@ -57,7 +57,7 @@ UPDATE_DAYS_INTERVAL = 30  # Update if not updated in N days
 # LLM Configuration
 PROFILE_MODEL = "gemini-2.5-pro"  # Deeper analysis for profiles
 PROFILE_TEMPERATURE = 0.3  # Consistent outputs
-MAX_PROFILE_WORDS = 500
+MAX_PROFILE_WORDS = 1000
 
 # Cache Configuration
 PROFILE_CACHE_TTL = 3600  # 1 hour
@@ -226,12 +226,20 @@ class ProfileService:
             
             # Generate profile text via LLM
             if existing_profile:
+                # Extract history
+                try:
+                    metadata = json.loads(existing_profile.metadata_json or '{}')
+                    forms_history = metadata.get('forms_analyzed', [])
+                except Exception:
+                    forms_history = []
+                    
                 profile_text = await self._update_profile_text(
                     existing_profile.profile_text,
                     form_data,
                     existing_profile.form_count,
                     form_type,
-                    form_purpose
+                    form_purpose,
+                    forms_history
                 )
             else:
                 profile_text = await self._create_profile_text(
@@ -252,7 +260,7 @@ class ProfileService:
             # Save to database
             if existing_profile:
                 profile = await self._update_profile_in_db(
-                    db, existing_profile, profile_text, confidence
+                    db, existing_profile, profile_text, confidence, form_type
                 )
             else:
                 profile = await self._create_profile_in_db(
@@ -285,11 +293,12 @@ class ProfileService:
         form_data: Dict[str, Any],
         previous_form_count: int,
         form_type: str,
-        form_purpose: str
+        form_purpose: str,
+        forms_history: List[str]
     ) -> Optional[str]:
         """Update existing profile text via LLM."""
         prompt = build_update_prompt(
-            existing_text, form_data, previous_form_count, form_type, form_purpose
+            existing_text, form_data, previous_form_count, form_type, form_purpose, forms_history
         )
         return await self._call_llm(prompt)
     
@@ -470,13 +479,30 @@ class ProfileService:
         db: AsyncSession,
         profile: UserProfile,
         new_text: str,
-        new_confidence: float
+        new_confidence: float,
+        form_type: str
     ) -> UserProfile:
         """Update existing profile in database."""
         profile.profile_text = new_text
         profile.confidence_score = new_confidence
         profile.form_count += 1
         profile.version += 1
+        
+        # Update metadata with new form type
+        try:
+            metadata = json.loads(profile.metadata_json or '{}')
+            forms_analyzed = metadata.get('forms_analyzed', [])
+            forms_analyzed.append(form_type)
+            metadata['forms_analyzed'] = forms_analyzed
+            metadata['last_form_type'] = form_type
+            profile.metadata_json = json.dumps(metadata)
+        except Exception:
+            # Fallback if metadata is corrupt
+            metadata = {
+                "forms_analyzed": [form_type],
+                "last_form_type": form_type
+            }
+            profile.metadata_json = json.dumps(metadata)
         
         await db.commit()
         await db.refresh(profile)
