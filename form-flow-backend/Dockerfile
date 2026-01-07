@@ -12,6 +12,9 @@ WORKDIR /app
 
 # Install system dependencies for Playwright and audio processing
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    # For building C extensions (webrtcvad)
+    gcc \
+    build-essential \
     # For Playwright browsers
     libnss3 \
     libnspr4 \
