@@ -103,5 +103,10 @@ class PromptManager:
             forms_history=history_str
         )
 
+    def build_condense_prompt(self, profile_text: str) -> str:
+        """Build a prompt to condense profile text."""
+        return profile_prompts.build_condense_prompt(profile_text)
+
+
 # Singleton
 prompt_manager = PromptManager()
