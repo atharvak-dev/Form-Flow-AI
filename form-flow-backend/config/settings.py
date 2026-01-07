@@ -56,13 +56,13 @@ class Settings(BaseSettings):
         default=None,
         description="Google Gemini API key for AI features"
     )
-    OPENAI_API_KEY: Optional[str] = Field(
-        default=None,
-        description="OpenAI API key (optional, for fallback)"
-    )
     ELEVENLABS_API_KEY: Optional[str] = Field(
         default=None,
         description="ElevenLabs API key for text-to-speech"
+    )
+    GROK_API_KEY: Optional[str] = Field(
+        default=None,
+        description="xAI Grok API key for fallback inference"
     )
     
     # ==========================================================================

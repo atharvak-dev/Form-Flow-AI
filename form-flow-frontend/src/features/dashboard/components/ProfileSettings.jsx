@@ -138,16 +138,25 @@ export function ProfileSettings() {
     return (
         <div className="space-y-6">
             {/* Header */}
-            <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDark ? 'bg-purple-500/20' : 'bg-purple-100'}`}>
-                    <Brain className={`w-5 h-5 ${isDark ? 'text-purple-400' : 'text-purple-600'}`} />
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDark ? 'bg-purple-500/20' : 'bg-purple-100'}`}>
+                        <Brain className={`w-5 h-5 ${isDark ? 'text-purple-400' : 'text-purple-600'}`} />
+                    </div>
+                    <div>
+                        <h2 className={`font-semibold ${textClass}`}>Behavioral Profile</h2>
+                        <p className={`text-xs ${subTextClass}`}>
+                            AI-generated insights from your form interactions
+                        </p>
+                    </div>
                 </div>
-                <div>
-                    <h2 className={`font-semibold ${textClass}`}>Behavioral Profile</h2>
-                    <p className={`text-xs ${subTextClass}`}>
-                        AI-generated insights from your form interactions
-                    </p>
-                </div>
+                <button
+                    onClick={fetchProfileData}
+                    className={`p-2 rounded-lg transition-all ${isDark ? 'hover:bg-white/10 text-white/60' : 'hover:bg-zinc-100 text-zinc-500'}`}
+                    title="Refresh Profile"
+                >
+                    <Loader2 className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                </button>
             </div>
 
             {/* Message Toast */}
@@ -158,8 +167,8 @@ export function ProfileSettings() {
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -10 }}
                         className={`p-3 rounded-xl flex items-center gap-2 text-sm ${message.type === 'success'
-                                ? 'bg-green-500/20 text-green-400 border border-green-500/30'
-                                : 'bg-red-500/20 text-red-400 border border-red-500/30'
+                            ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                            : 'bg-red-500/20 text-red-400 border border-red-500/30'
                             }`}
                     >
                         {message.type === 'success' ? <CheckCircle className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
@@ -185,8 +194,8 @@ export function ProfileSettings() {
                     <button
                         onClick={handleToggleProfiling}
                         className={`p-2 rounded-lg transition-all ${status?.profiling_enabled
-                                ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
-                                : 'bg-zinc-500/20 text-zinc-400 hover:bg-zinc-500/30'
+                            ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
+                            : 'bg-zinc-500/20 text-zinc-400 hover:bg-zinc-500/30'
                             }`}
                     >
                         {status?.profiling_enabled ? <ToggleRight className="w-6 h-6" /> : <ToggleLeft className="w-6 h-6" />}
@@ -202,8 +211,8 @@ export function ProfileSettings() {
                             <User className={`w-4 h-4 ${subTextClass}`} />
                             <span className={`text-sm font-medium ${textClass}`}>Your Profile</span>
                             <span className={`px-2 py-0.5 rounded-full text-xs ${profile.confidence_level === 'high' ? 'bg-green-500/20 text-green-400' :
-                                    profile.confidence_level === 'medium' ? 'bg-yellow-500/20 text-yellow-400' :
-                                        'bg-zinc-500/20 text-zinc-400'
+                                profile.confidence_level === 'medium' ? 'bg-yellow-500/20 text-yellow-400' :
+                                    'bg-zinc-500/20 text-zinc-400'
                                 }`}>
                                 {Math.round(profile.confidence_score * 100)}% confidence
                             </span>

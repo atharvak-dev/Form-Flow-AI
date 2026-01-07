@@ -33,6 +33,7 @@ from core.models import User, UserProfile
 from config.settings import settings
 from utils.logging import get_logger
 from utils.cache import get_cached, set_cached, delete_cached
+from services.ai.local_llm import get_local_llm_service
 
 from .prompts.profile_prompts import (
     build_create_prompt,
@@ -87,8 +88,10 @@ class ProfileService:
         
         if self.api_key:
             logger.info("ProfileService initialized with Gemini API")
-        else:
-            logger.warning("ProfileService: No API key - profile generation disabled")
+        
+        self.local_llm = get_local_llm_service()
+        if self.local_llm:
+            logger.info("ProfileService: Local LLM available")
     
     @property
     def llm(self) -> Optional[ChatGoogleGenerativeAI]:
@@ -193,8 +196,8 @@ class ProfileService:
         Returns:
             Updated UserProfile or None if skipped/failed
         """
-        if not self.llm:
-            logger.warning("Profile generation skipped: LLM not available")
+        if not self.llm and not self.local_llm:
+            logger.warning("Profile generation skipped: No LLM available")
             return None
         
         try:
@@ -305,6 +308,45 @@ class ProfileService:
     
     async def _call_llm(self, prompt: str) -> Optional[str]:
         """Make LLM call with error handling."""
+        # Try Local LLM first if available
+        if self.local_llm:
+            try:
+                # Add context about being a behavioral analyst
+                system_instruction = "You are an expert behavioral analyst. Analyze the user's form data to create a detailed behavioral profile."
+                
+                # 10 second timeout for Local LLM
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self.local_llm.generate_response, 
+                        system_instruction, 
+                        prompt
+                    ),
+                    timeout=10.0
+                )
+                
+                if result and len(result) > 20:  # Basic validation
+                    return result.strip()
+            
+            except asyncio.TimeoutError:
+                logger.warning("Local LLM profile generation timed out (10s). Switching to Grok fallback...")
+                # Fallback to Grok
+                grok_result = await self._call_grok(prompt)
+                if grok_result:
+                    return grok_result
+                    
+            except Exception as e:
+                logger.warning(f"Local LLM profile generation failed: {e}, attempting fallback")
+
+        # Fallback to Grok if Local LLM failed/timed out and didn't return
+        if settings.GROK_API_KEY:
+             grok_result = await self._call_grok(prompt)
+             if grok_result:
+                 return grok_result
+
+        # Final Fallback to Gemini
+        if not self.llm:
+            return None
+
         try:
             chain = ChatPromptTemplate.from_messages([
                 ("human", "{prompt}")
@@ -321,6 +363,53 @@ class ProfileService:
             return None
         except Exception as e:
             logger.error(f"LLM call failed: {e}")
+            return None
+
+    async def _call_grok(self, prompt: str) -> Optional[str]:
+        """Call xAI Grok API as fallback."""
+        import os
+        api_key = settings.GROK_API_KEY or os.getenv("GROK_API_KEY")
+        
+        if not api_key:
+            logger.warning("Grok API call skipped: GROK_API_KEY not found in settings or env")
+            return None
+            
+        try:
+            # Use OpenAI client as it's cleaner for Grok (compatible endpoint)
+            # but httpx is already installed and simple. Sticking to httpx for minimal dependency risk
+            # but adding better logging to debug failures.
+            import httpx
+            
+            logger.info(f"Calling Grok API (Key ending in ...{api_key[-4:]})...")
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    "https://api.x.ai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": "grok-beta",
+                        "messages": [
+                            {"role": "system", "content": "You are an expert behavioral analyst."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        "stream": False,
+                        "temperature": 0.3
+                    },
+                    timeout=30.0
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    content = data['choices'][0]['message']['content'].strip()
+                    logger.info("Grok API call successful")
+                    return content
+                else:
+                    logger.warning(f"Grok API error {response.status_code}: {response.text}")
+                    return None
+        except Exception as e:
+            logger.error(f"Grok API call failed: {e}")
             return None
     
     def _calculate_confidence(self, form_count: int, question_count: int) -> float:

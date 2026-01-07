@@ -16,8 +16,13 @@ const FormCompletion = ({ formData, formSchema, originalUrl, pdfId, onReset }) =
             if (formData && Object.keys(formData).length > 0) {
                 setProfileUpdateStatus('updating');
                 try {
-                    await generateProfile(formData, "Web Form", "Form Completion");
-                    setProfileUpdateStatus('success');
+                    const response = await generateProfile(formData, "Web Form", "Form Completion");
+                    if (response.success) {
+                        setProfileUpdateStatus('success');
+                    } else {
+                        console.warn("Profile update API returned false:", response.message);
+                        setProfileUpdateStatus('error');
+                    }
                 } catch (error) {
                     console.error("Profile update failed:", error);
                     setProfileUpdateStatus('error');
