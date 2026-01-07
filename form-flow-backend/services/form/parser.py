@@ -401,7 +401,7 @@ async def _extract_standard_forms(frame) -> List[Dict]:
 # NOTE: The original inline JS extraction code has been moved to
 # services/form/extractors/standard.py for better maintainability.
 # The following placeholder prevents accidental usage of old code.
-_STANDARD_EXTRACTION_MOVED = """
+_STANDARD_EXTRACTION_MOVED = r"""
             const isVisible = el => {
                 if (!el) return false;
                 const style = window.getComputedStyle(el);
@@ -769,7 +769,7 @@ async def _extract_google_forms(page) -> List[Dict]:
 
 # NOTE: The original inline JS extraction code has been moved to
 # services/form/extractors/google_forms.py for better maintainability.
-_GOOGLE_FORMS_EXTRACTION_MOVED = """
+_GOOGLE_FORMS_EXTRACTION_MOVED = r"""
             const getText = el => el ? (el.innerText || el.textContent || '').trim() : '';
             const titleEl = document.querySelector('[role="heading"], .freebirdFormviewerViewHeaderTitle, h1');
             const formTitle = getText(titleEl);
