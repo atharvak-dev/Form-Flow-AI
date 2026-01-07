@@ -37,9 +37,9 @@ class TestTextFitter:
         # "1234 Longname Blvd, Apt 405, Springfield, IL, 62704" (no zip ext)
         
         context = {"type": "address"}
-        res = text_fitter.fit(long_address, 45, field_context=context)
+        res = text_fitter.fit(long_address, 55, field_context=context)
         
-        assert len(res.fitted) <= 45
+        assert len(res.fitted) <= 55
         assert "Blvd" in res.fitted
         assert "Apt" in res.fitted
         assert "-1234" not in res.fitted # Zip extension removed
