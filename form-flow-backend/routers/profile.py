@@ -22,7 +22,7 @@ from typing import Dict, Any, Optional, List
 
 from core import database, models
 from services.ai.profile import ProfileService, ProfileConfig
-from services.ai.profile.service import ProfileService as LegacyProfileService
+from services.ai.profile.service import ProfileService as LegacyProfileService, get_profile_service
 import auth
 from utils.logging import get_logger
 from sqlalchemy.future import select

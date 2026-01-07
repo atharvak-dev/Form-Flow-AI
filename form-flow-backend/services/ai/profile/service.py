@@ -343,7 +343,7 @@ class ProfileService:
         form_purpose: str
     ) -> Optional[str]:
         """Generate initial profile text via LLM."""
-        prompt = build_create_prompt(form_data, form_type, form_purpose)
+        prompt = prompt_manager.build_create_prompt(form_data, form_type, form_purpose)
         return await self._call_llm(prompt)
     
     async def _update_profile_text(
@@ -356,7 +356,7 @@ class ProfileService:
         forms_history: List[str]
     ) -> Optional[str]:
         """Update existing profile text via LLM."""
-        prompt = build_update_prompt(
+        prompt = prompt_manager.build_update_prompt(
             existing_text, form_data, previous_form_count, form_type, form_purpose, forms_history
         )
         return await self._call_llm(prompt)
@@ -369,7 +369,7 @@ class ProfileService:
             return profile_text
         
         logger.info(f"Condensing profile: {word_count} -> {MAX_PROFILE_WORDS} words")
-        prompt = build_condense_prompt(profile_text)
+        prompt = prompt_manager.build_condense_prompt(profile_text)
         condensed = await self._call_llm(prompt)
         
         return condensed if condensed else profile_text[:MAX_PROFILE_WORDS * 7]  # Fallback
