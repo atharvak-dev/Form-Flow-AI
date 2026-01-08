@@ -8,14 +8,6 @@ from .smart_autofill import SmartAutofill, get_smart_autofill
 from .analytics import FormAnalytics, get_form_analytics
 from .multilingual import MultilingualProcessor, get_multilingual_processor, Language
 from services.ai.profile import ProfileService, get_profile_service, generate_profile_background
-from services.ai.profile.suggestions import (
-    ProfileSuggestionEngine,
-    get_profile_suggestion_engine,
-    get_intelligent_suggestions,
-    IntelligentSuggestion,
-    SuggestionTier,
-)
-
 __all__ = [
     # Gemini
     "GeminiService",
@@ -44,12 +36,6 @@ __all__ = [
     "ProfileService",
     "get_profile_service",
     "generate_profile_background",
-    # Intelligent Suggestions
-    "ProfileSuggestionEngine",
-    "get_profile_suggestion_engine",
-    "get_intelligent_suggestions",
-    "IntelligentSuggestion",
-    "SuggestionTier",
 ]
 
 

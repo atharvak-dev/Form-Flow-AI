@@ -7,7 +7,7 @@ MultiModalFallback, and NoiseHandler.
 
 import pytest
 
-from services.ai.voice_processor import (
+from services.ai.voice import (
     VoiceInputProcessor,
     ClarificationStrategy,
     ConfidenceCalibrator,
@@ -17,7 +17,7 @@ from services.ai.voice_processor import (
     FieldImportance,
     StreamingSpeechHandler,
     PartialUtterance,
-    PhoneticMatcher,  # NEW
+    PhoneticMatcher,
 )
 
 

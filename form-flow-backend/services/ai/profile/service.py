@@ -40,8 +40,6 @@ import time
 from . import prompts as profile_prompts
 from .config import profile_config
 from .validator import ProfileValidator
-from .evaluation import evaluator
-from .safeguards import rate_limiter, circuit_breaker
 from .prompt_manager import prompt_manager
 
 logger = get_logger(__name__)
@@ -184,15 +182,6 @@ class ProfileService:
         Returns:
             Updated UserProfile or None if skipped/failed
         """
-        # SAFEGUARD: Circuit Breaker
-        if not circuit_breaker.can_proceed():
-            logger.warning("Profile update blocked by Circuit Breaker (LLM unstable)")
-            return None
-
-        # SAFEGUARD: Rate Limiter
-        # Note: We check this early to avoid unnecessary DB calls if possible,
-        # but user check is needed first. moving check inside.
-
         if not self.llm and not self.local_llm:
             logger.warning("Profile generation skipped: No LLM available")
             return None
@@ -213,12 +202,6 @@ class ProfileService:
             # Fetch existing profile
             existing_profile = await self._get_profile_from_db(db, user_id)
             
-            # SAFEGUARD: Rate Limiter Check
-            is_allowed, limit_reason = rate_limiter.check_limit(user_id)
-            if not is_allowed and not force:
-                logger.warning(f"Profile update skipped for user {user_id}: {limit_reason}")
-                return existing_profile
-
             # Check if update should happen
             if not force and not self.should_update_profile(
                 form_data, existing_profile, len(form_data)
@@ -256,9 +239,6 @@ class ProfileService:
                         form_data, form_type, form_purpose
                     )
                 )
-            
-            # SAFEGUARD: Rate Limiter Record
-            rate_limiter.record_request(user_id)
             
             # Validate LLM Output
             is_valid_output, parsed_profile, validation_error = ProfileValidator.validate_llm_output(raw_response)
@@ -298,42 +278,10 @@ class ProfileService:
             
             logger.info(f"Profile generated for user {user_id}: confidence={confidence:.2f}")
             
-            # SAFEGUARD: Circuit Breaker Success
-            circuit_breaker.record_success()
-            
-            # Metrics: Success
-            # Estimate input chars roughly from form data + prompt template
-            input_chars = len(str(form_data)) + 500 
-            output_chars = len(profile_text)
-            
-            evaluator.track_update(
-                user_id=user_id,
-                start_time=start_time,
-                success=True,
-                profile_data={"confidence_score": confidence, "version": profile.version},
-                metadata={
-                    "form_type": form_type,
-                    "input_chars": input_chars,
-                    "output_chars": output_chars
-                }
-            )
-            
             return profile
             
         except Exception as e:
             logger.error(f"Profile generation failed for user {user_id}: {e}")
-            
-            # SAFEGUARD: Circuit Breaker Failure
-            circuit_breaker.record_failure()
-            
-            # Metrics: Failure
-            evaluator.track_update(
-                user_id=user_id,
-                start_time=time.time(), # We'll just capture end time near enough
-                success=False,
-                error=e,
-                metadata={"form_type": form_type}
-            )
             return None
     
     async def _create_profile_text(
