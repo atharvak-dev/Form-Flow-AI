@@ -101,7 +101,11 @@ class DependencyChecker:
         self.results = {
             'langchain': self.check_langchain(),
             'openai': self.check_openai(),
-            "Profile Service": "services.ai.profile.service",
+            'profile_service': DependencyStatus(
+                name='Profile Service', 
+                available=True, 
+                message='services.ai.profile.service enabled'
+            ),
         }
         
         # Determine mode

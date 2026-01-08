@@ -4,7 +4,7 @@ from typing import Optional, List, Dict, Any
 import logging
 
 from services.ai.suggestion_engine import SuggestionEngine, Suggestion
-from services.ai.profile_suggestions import (
+from services.ai.profile.suggestions import (
     get_intelligent_suggestions,
     IntelligentSuggestion,
     SuggestionTier,
@@ -194,7 +194,7 @@ async def get_smart_suggestions(
             )
         else:
             # Anonymous user - use pattern-only tier
-            from services.ai.profile_suggestions import get_profile_suggestion_engine
+            from services.ai.profile.suggestions import get_profile_suggestion_engine
             engine = get_profile_suggestion_engine()
             suggestions = engine._tier3_pattern_only(field_context, data.previous_answers or {})
         
