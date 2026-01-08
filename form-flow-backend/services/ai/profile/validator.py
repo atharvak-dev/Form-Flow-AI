@@ -43,6 +43,7 @@ class ProfileValidator:
     def validate_llm_output(output_text: str) -> Tuple[bool, Optional[Dict[str, Any]], str]:
         """
         Validate LLM output structure and content.
+        Supports both legacy format and new sections-based format.
         
         Args:
             output_text: Raw string response from LLM
@@ -53,29 +54,54 @@ class ProfileValidator:
         if not output_text:
             return False, None, "Empty LLM output"
             
-        # 1. JSON parsing check
+        # 1. JSON parsing - clean potential markdown/preamble
         try:
-            # Clean potential markdown code blocks
             clean_text = output_text.strip()
+            
+            # Strip markdown code blocks
             if clean_text.startswith("```json"):
                 clean_text = clean_text[7:]
+            elif clean_text.startswith("```"):
+                clean_text = clean_text[3:]
             if clean_text.endswith("```"):
                 clean_text = clean_text[:-3]
+            clean_text = clean_text.strip()
             
+            # Find JSON object bounds (handle preamble text)
+            json_start = clean_text.find('{')
+            json_end = clean_text.rfind('}')
+            
+            if json_start == -1 or json_end == -1:
+                return False, None, "No JSON object found in response"
+            
+            clean_text = clean_text[json_start:json_end + 1]
             data = json.loads(clean_text)
+            
         except json.JSONDecodeError as e:
             return False, None, f"Invalid JSON format: {str(e)}"
             
-        # 2. Schema validation (Essential keys)
+        # 2. Check format type and validate accordingly
+        
+        # New sections-based format
+        if "sections" in data and isinstance(data.get("sections"), list):
+            if len(data["sections"]) == 0:
+                return False, data, "Sections array is empty"
+            # Validate each section has title + content or points
+            for i, section in enumerate(data["sections"]):
+                if "title" not in section:
+                    return False, data, f"Section {i} missing 'title'"
+                if "content" not in section and "points" not in section:
+                    return False, data, f"Section '{section.get('title', i)}' missing 'content' or 'points'"
+            return True, data, "Output valid (sections format)"
+        
+        # Legacy format - check for required keys
         required_keys = ["executive_summary", "psychological_profile", "behavioral_patterns"]
         missing_keys = [key for key in required_keys if key not in data]
         
         if missing_keys:
-            # DEBUG
-            print(f"DEBUG VALIDATOR: Found keys: {list(data.keys())}")
             return False, data, f"Missing required sections: {', '.join(missing_keys)}"
             
-        return True, data, "Output valid"
+        return True, data, "Output valid (legacy format)"
 
     @staticmethod
     def calculate_confidence(

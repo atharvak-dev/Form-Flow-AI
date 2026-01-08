@@ -1,18 +1,19 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
     User, Shield, Edit3, Trash2, ToggleLeft, ToggleRight,
     Save, X, AlertTriangle, CheckCircle, Brain, Loader2,
     Activity, TrendingUp, Target, MessageSquare, Zap, BookOpen,
-    Layers, Search, Compass
+    Layers, Search, Compass, Info, FileText
 } from "lucide-react"
 import {
     getProfile, updateProfile, deleteProfile,
     getProfileStatus, optInProfiling, optOutProfiling
 } from '@/services/api'
 import { useTheme } from '@/context/ThemeProvider'
+import { normalizeProfileData, isSectionsFormat } from '@/utils/profileTransformer'
 
 /**
  * ProfileSettings - Profile Management UI Component
@@ -144,161 +145,7 @@ export function ProfileSettings() {
 
     // --- RENDER HELPERS ---
 
-    const renderStructuredProfile = (jsonText) => {
-        let data
-        try {
-            data = JSON.parse(jsonText)
-        } catch (e) {
-            return renderLegacyProfile(jsonText)
-        }
 
-        // Mapping sections to icons
-        const Section = ({ title, icon: Icon, children }) => (
-            <div className="mb-6 last:mb-0">
-                <div className="flex items-center gap-2 mb-3">
-                    <Icon className={`w-4 h-4 ${accentClass}`} />
-                    <h4 className={`text-sm font-semibold uppercase tracking-wider ${subTextClass}`}>{title}</h4>
-                </div>
-                <div className="pl-6 border-l md:border-l-2 border-dashed border-white/10 ml-2">
-                    {children}
-                </div>
-            </div>
-        )
-
-        return (
-            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                {/* Executive Summary */}
-                <div className={`p-4 rounded-xl ${isDark ? 'bg-purple-900/10 border-purple-500/20' : 'bg-purple-50 border-purple-100'} border`}>
-                    <h3 className={`font-serif text-lg leading-relaxed italic ${textClass}`}>
-                        "{data.executive_summary}"
-                    </h3>
-                </div>
-
-                {/* Case Study Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-
-                    {/* Psychological Profile */}
-                    <Section title="Psychological Profile" icon={Brain}>
-                        <div className="space-y-4">
-                            <div>
-                                <span className={`text-xs uppercase ${subTextClass}`}>Archetype</span>
-                                <div className={`font-bold text-lg ${accentClass}`}>{data.psychological_profile?.personality_archetype || 'Unknown'}</div>
-                            </div>
-                            <div>
-                                <span className={`text-xs uppercase ${subTextClass}`}>Mindset Analysis</span>
-                                <p className={`text-sm leading-relaxed ${textClass} mt-1`}>
-                                    {data.psychological_profile?.mindset_analysis}
-                                </p>
-                            </div>
-                            <div className="flex flex-wrap gap-2 pt-2">
-                                {data.psychological_profile?.core_traits?.map((trait, i) => (
-                                    <span key={i} className={`px-2 py-1 rounded-md text-xs font-medium ${isDark ? 'bg-white/10 text-white' : 'bg-zinc-100 text-zinc-700'}`}>
-                                        {trait}
-                                    </span>
-                                ))}
-                            </div>
-                        </div>
-                    </Section>
-
-                    {/* Behavioral Patterns */}
-                    <Section title="Behavioral Patterns" icon={Activity}>
-                        <div className="space-y-4 text-sm">
-                            <div className={`p-3 rounded-lg ${isDark ? 'bg-white/5' : 'bg-zinc-50'}`}>
-                                <div className="flex items-center gap-2 mb-1">
-                                    <Compass className="w-3 h-3 text-blue-400" />
-                                    <span className={`font-medium ${textClass}`}>Decision Making</span>
-                                </div>
-                                <p className={subTextClass}>{data.behavioral_patterns?.decision_making}</p>
-                            </div>
-                            <div className={`p-3 rounded-lg ${isDark ? 'bg-white/5' : 'bg-zinc-50'}`}>
-                                <div className="flex items-center gap-2 mb-1">
-                                    <Shield className="w-3 h-3 text-green-400" />
-                                    <span className={`font-medium ${textClass}`}>Risk Tolerance</span>
-                                </div>
-                                <p className={subTextClass}>{data.behavioral_patterns?.risk_tolerance}</p>
-                            </div>
-                            <div className={`p-3 rounded-lg ${isDark ? 'bg-white/5' : 'bg-zinc-50'}`}>
-                                <div className="flex items-center gap-2 mb-1">
-                                    <MessageSquare className="w-3 h-3 text-yellow-400" />
-                                    <span className={`font-medium ${textClass}`}>Communication</span>
-                                </div>
-                                <p className={subTextClass}>{data.behavioral_patterns?.communication_style}</p>
-                            </div>
-                        </div>
-                    </Section>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    {/* Motivation */}
-                    <Section title="Motivation Matrix" icon={Zap}>
-                        <div className="space-y-4">
-                            <div>
-                                <div className={`text-xs mb-2 ${subTextClass}`}>DRIVERS</div>
-                                <ul className="space-y-1">
-                                    {data.motivation_matrix?.underlying_drivers?.map((d, i) => (
-                                        <li key={i} className="flex items-center gap-2 text-sm text-zinc-400">
-                                            <Target className="w-3 h-3 text-red-400" />
-                                            <span className={textClass}>{d}</span>
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                            <div className="mt-4">
-                                <span className={`text-xs ${subTextClass}`}>DEFINITION OF SUCCESS</span>
-                                <p className={`text-sm italic mt-1 ${textClass} opacity-80`}>
-                                    "{data.motivation_matrix?.success_metrics}"
-                                </p>
-                            </div>
-                        </div>
-                    </Section>
-
-                    {/* Growth */}
-                    <Section title="Growth Trajectory" icon={TrendingUp}>
-                        <div className="space-y-4 text-sm">
-                            <div>
-                                <span className={`text-xs ${subTextClass}`}>CURRENT FOCUS</span>
-                                <p className={`mt-1 font-medium ${textClass}`}>
-                                    {data.growth_trajectory?.current_focus}
-                                </p>
-                            </div>
-                            <div className={`p-3 rounded-lg border-l-2 border-yellow-500 ${isDark ? 'bg-yellow-500/5' : 'bg-yellow-50'}`}>
-                                <span className="text-xs text-yellow-500 font-bold uppercase block mb-1">Blind Spots</span>
-                                <ul className="list-disc list-inside space-y-1">
-                                    {data.growth_trajectory?.potential_blind_spots?.map((bs, i) => (
-                                        <li key={i} className={subTextClass}>{bs}</li>
-                                    ))}
-                                </ul>
-                            </div>
-                        </div>
-                    </Section>
-                </div>
-
-                {/* History / Evolution (if present) */}
-                {data.interaction_history && (
-                    <Section title="Interaction Analytics" icon={Layers}>
-                        <div className={`p-4 rounded-xl border ${isDark ? 'bg-white/5 border-white/10' : 'bg-zinc-50 border-zinc-200'}`}>
-                            <div className="flex items-start gap-4">
-                                <div className="mt-1">
-                                    <TrendingUp className="w-5 h-5 text-green-400" />
-                                </div>
-                                <div>
-                                    <h5 className={`text-sm font-medium ${textClass}`}>Behavioral Evolution</h5>
-                                    <p className={`text-sm mt-1 ${subTextClass}`}>
-                                        {data.interaction_history?.behavioral_evolution}
-                                    </p>
-                                </div>
-                            </div>
-                            {data.interaction_history?.observation_log && (
-                                <div className={`mt-4 pt-4 border-t ${isDark ? 'border-white/10' : 'border-zinc-200'} text-xs ${subTextClass}`}>
-                                    <span className="font-semibold text-purple-400">Latest Observation:</span> {data.interaction_history?.observation_log}
-                                </div>
-                            )}
-                        </div>
-                    </Section>
-                )}
-            </div>
-        )
-    }
 
     const renderLegacyProfile = (text) => (
         <div className={`text-sm leading-relaxed whitespace-pre-wrap font-mono opacity-80 ${subTextClass}`}>
@@ -306,6 +153,133 @@ export function ProfileSettings() {
         </div>
     )
 
+    /**
+     * Render sections-based profile format with enhanced styling
+     */
+    const renderSectionsProfile = (normalizedData) => {
+        if (!normalizedData?.sections || normalizedData.sections.length === 0) {
+            return (
+                <div className={`text-center py-8 ${subTextClass}`}>
+                    No profile sections available
+                </div>
+            )
+        }
+
+        // Map section titles to icons
+        const getIconForSection = (title) => {
+            const lowerTitle = title.toLowerCase()
+            if (lowerTitle.includes('summary') || lowerTitle.includes('overview')) return BookOpen
+            if (lowerTitle.includes('psycholog') || lowerTitle.includes('personality')) return Brain
+            if (lowerTitle.includes('behavior') || lowerTitle.includes('pattern')) return Activity
+            if (lowerTitle.includes('motivation') || lowerTitle.includes('driver')) return Zap
+            if (lowerTitle.includes('growth') || lowerTitle.includes('trajectory')) return TrendingUp
+            if (lowerTitle.includes('decision')) return Compass
+            if (lowerTitle.includes('communic')) return MessageSquare
+            if (lowerTitle.includes('risk')) return Shield
+            if (lowerTitle.includes('history') || lowerTitle.includes('evolution')) return Layers
+            return FileText
+        }
+
+        return (
+            <motion.div
+                className="space-y-6"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4 }}
+            >
+                {/* Format indicator badge */}
+                {normalizedData._transformed && (
+                    <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${isDark ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-amber-50 text-amber-600 border border-amber-200'}`}>
+                        <Info className="w-3 h-3" />
+                        <span>Profile format: {normalizedData._originalFormat || 'auto-converted'}</span>
+                    </div>
+                )}
+
+                {normalizedData.sections.map((section, index) => {
+                    const Icon = getIconForSection(section.title)
+                    const isFirstSection = index === 0
+
+                    return (
+                        <motion.div
+                            key={index}
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: index * 0.1 }}
+                            className={`relative ${isFirstSection ? '' : 'pl-4 border-l-2'} ${isDark
+                                ? 'border-purple-500/30'
+                                : 'border-purple-300'
+                                }`}
+                        >
+                            {/* Section header */}
+                            <div className="flex items-center gap-2 mb-3">
+                                <div className={`p-1.5 rounded-md ${isDark ? 'bg-purple-500/20' : 'bg-purple-100'}`}>
+                                    <Icon className={`w-4 h-4 ${accentClass}`} />
+                                </div>
+                                <h4 className={`text-sm font-semibold uppercase tracking-wider ${subTextClass}`}>
+                                    {section.title}
+                                </h4>
+                            </div>
+
+                            {/* Content section */}
+                            {section.content && (
+                                <div className={`p-4 rounded-xl ${isFirstSection
+                                    ? isDark
+                                        ? 'bg-gradient-to-br from-purple-900/20 to-transparent border border-purple-500/20'
+                                        : 'bg-gradient-to-br from-purple-50 to-white border border-purple-100'
+                                    : isDark
+                                        ? 'bg-white/5'
+                                        : 'bg-zinc-50'
+                                    }`}>
+                                    <p className={`text-sm leading-relaxed ${textClass} ${isFirstSection ? 'font-medium' : ''}`}>
+                                        {isFirstSection ? `"${section.content}"` : section.content}
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* Points section */}
+                            {section.points && Array.isArray(section.points) && (
+                                <div className="space-y-2 mt-2">
+                                    {section.points.map((point, pointIdx) => (
+                                        <div
+                                            key={pointIdx}
+                                            className={`flex items-start gap-3 p-2 rounded-lg transition-colors ${isDark
+                                                ? 'hover:bg-white/5'
+                                                : 'hover:bg-zinc-50'
+                                                }`}
+                                        >
+                                            <span className={`mt-1 flex-shrink-0 w-1.5 h-1.5 rounded-full ${isDark ? 'bg-purple-400' : 'bg-purple-500'
+                                                }`} />
+                                            <span className={`text-sm ${textClass}`}>{point}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </motion.div>
+                    )
+                })}
+            </motion.div>
+        )
+    }
+
+    /**
+     * Main profile render dispatcher - handles both formats
+     */
+    const renderProfile = (profileText) => {
+        // Always try to normalize first - the transformer handles:
+        // 1. Markdown strings (converted to sections)
+        // 2. JSON strings (parsed and normalized)
+        // 3. Raw text (wrapped in a section)
+        // 4. Existing objects
+        const normalized = normalizeProfileData(profileText)
+
+        // If we got valid sections back, render them
+        if (normalized?.sections && normalized.sections.length > 0) {
+            return renderSectionsProfile(normalized)
+        }
+
+        // Ultimate fallback if normalization totally failed
+        return renderLegacyProfile(profileText)
+    }
 
     if (loading) {
         return (
@@ -467,7 +441,7 @@ export function ProfileSettings() {
                             </div>
                         </div>
                     ) : (
-                        renderStructuredProfile(profile.profile_text)
+                        renderProfile(profile.profile_text)
                     )}
                 </div>
             ) : (

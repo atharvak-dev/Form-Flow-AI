@@ -14,14 +14,16 @@ import json
 # =============================================================================
 
 PROFILE_CREATE_PROMPT = """# ROLE
-You are an expert behavioral analyst and psychologist. You assume the persona of a lead researcher writing a psychological case study on a subject.
+You are an expert behavioral analyst creating a psychological profile.
 
-# TASK
-Analyze the provided Form Questions and Answers to create a "Personal Case Study" of the user.
-Do NOT use generic AI language ("As an AI", "Based on the data"). Write with authority and depth.
+# CRITICAL RESPONSE RULES
+1. Return ONLY valid JSON - no markdown, no explanation, no preamble
+2. Start your response with {{ and end with }}
+3. Use professional language with depth and authority
+4. Do NOT say "As an AI" or "Based on the data"
 
-# OUTPUT FORMAT
-You must return VALID JSON with the following schema. Ensure strict JSON syntax.
+# OUTPUT SCHEMA
+Return EXACTLY this JSON structure:
 
 {{
     "executive_summary": "A 2-3 sentence high-level overview of who this person is.",
@@ -65,17 +67,13 @@ You must return VALID JSON with the following schema. Ensure strict JSON syntax.
 # =============================================================================
 
 PROFILE_UPDATE_PROMPT = """# ROLE
-You are an expert behavioral analyst updating a "Personal Case Study".
+You are an expert behavioral analyst updating a psychological profile.
 
-# TASK
-Integrate new 'Questions and Answers' into the existing psychological profile.
-Maintain the structured JSON format.
-
-# CRITICAL RULES
-1. **Conflict Resolution**: If new Q&A contradicts the existing profile, prioritize the NEW information (it is more recent).
-   - "I prefer email" (New) overrides "I prefers calls" (Old).
-2. **Coherence**: Integrate new info seamlessly. Do NOT just append contradictory notes. Rewrite sections to make them deeper and more accurate.
-3. **Strict JSON**: Output must be valid JSON matching the schema below.
+# CRITICAL RESPONSE RULES
+1. Return ONLY valid JSON - no markdown, no explanation, no preamble
+2. Start your response with {{ and end with }}
+3. If new data contradicts existing profile, prioritize NEW information
+4. Integrate changes seamlessly, do NOT append contradictory notes
 
 # HISTORY
 Forms previously filled by this user: {forms_history}
@@ -92,12 +90,12 @@ Forms previously filled by this user: {forms_history}
 {questions_and_answers}
 
 # UPDATE INSTRUCTIONS
-1. **Refine Archetype**: Does the new data support or contradict the current archetype? Adjust if needed.
-2. **Track Evolution**: In the 'interaction_history' section, note any shifts or reinforcements.
-3. **Deepen Insight**: Use the new Q&A to make the 'mindset_analysis' more specific to this user's nuances.
+1. Refine archetype if new data changes the picture
+2. Track evolution in 'interaction_history' section
+3. Deepen 'mindset_analysis' with new insights
 
-# OUTPUT FORMAT
-Return VALID JSON updating the schema. You MUST include a new field "interaction_history":
+# OUTPUT SCHEMA
+Return the updated profile with this structure:
 
 {{
     "executive_summary": "Updated summary...",
@@ -106,12 +104,23 @@ Return VALID JSON updating the schema. You MUST include a new field "interaction
         "core_traits": [...],
         "mindset_analysis": "..."
     }},
-    "behavioral_patterns": {{ ... }},
-    "motivation_matrix": {{ ... }},
-    "growth_trajectory": {{ ... }},
+    "behavioral_patterns": {{
+        "decision_making": "...",
+        "risk_tolerance": "...",
+        "communication_style": "..."
+    }},
+    "motivation_matrix": {{
+        "underlying_drivers": [...],
+        "success_metrics": "..."
+    }},
+    "growth_trajectory": {{
+        "current_focus": "...",
+        "potential_blind_spots": [...],
+        "development_areas": "..."
+    }},
     "interaction_history": {{
-        "observation_log": "A brief note on how this specific form '{form_type}' added to your understanding.",
-        "behavioral_evolution": "Describe any changes in the user's style over time (e.g., 'Becoming more decisive')."
+        "observation_log": "A brief note on how this form '{form_type}' added to understanding.",
+        "behavioral_evolution": "Describe any changes in style over time."
     }}
 }}
 """

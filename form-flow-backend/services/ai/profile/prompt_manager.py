@@ -61,11 +61,7 @@ class PromptManager:
     def build_create_prompt(self, form_data: dict, form_type: str, form_purpose: str, version: str = None) -> str:
         """Build create prompt using versioning."""
         template = self.get_prompt("profile_create", version)
-        return profile_prompts.format_questions_and_answers(form_data) # Re-using helper if needed
-        # Wait, the helper usage in profile_prompts.py is coupled with the `build` functions there.
-        # Ideally, we should use the builder functions logic here but inject the template.
         
-        # Let's re-implement the formatting injection here to decouple
         qa_str = profile_prompts.format_questions_and_answers(form_data)
         question_count = len(form_data)
         
