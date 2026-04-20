@@ -10,6 +10,9 @@ from typing import Dict, List, Optional
 from dataclasses import dataclass
 
 from pypdf import PdfReader
+from utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -80,7 +83,7 @@ class XfaParser:
                         data = stream.get_data().decode('utf-8', errors='replace')
                         self.xfa_parts[label] = data
         except Exception as e:
-            print(f"Error extracting XFA: {e}")
+            logger.warning(f"Error extracting XFA: {e}")
     
     def _parse_template(self, template: str):
         """Parse XFA template XML to extract fields with robust page detection."""
@@ -220,5 +223,5 @@ def parse_xfa_fields(pdf_path) -> List[XfaField]:
         parser = XfaParser(pdf_path)
         return parser.parse()
     except Exception as e:
-        print(f"XFA parsing error: {e}")
+        logger.warning(f"XFA parsing error: {e}")
         return []

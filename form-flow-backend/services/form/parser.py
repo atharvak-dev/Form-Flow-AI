@@ -13,6 +13,10 @@ import re
 import os
 import sys
 
+from utils.logging import get_logger
+
+logger = get_logger(__name__)
+
 # Import modular extractors
 from services.form.extractors.standard import extract_standard_forms as _modular_extract_standard
 from services.form.extractors.google_forms import extract_google_forms as _modular_extract_google, wait_for_google_form as _modular_wait_google
@@ -144,7 +148,7 @@ def _sync_get_form_schema(
             page = context.new_page()
             page.route("**/*", lambda r: r.abort() if r.request.resource_type in {"media", "font"} else r.continue_())
             
-            print(f"🔗 Navigating to {'Google Form' if is_google_form else 'page'}...")
+            logger.info(f"Navigating to {'Google Form' if is_google_form else 'page'}...")
             page.goto(url, wait_until="domcontentloaded", timeout=120000)
             
             # Wait for content
@@ -158,7 +162,7 @@ def _sync_get_form_schema(
                 import time
                 time.sleep(2)
             
-            print("✓ Page loaded, extracting forms...")
+            logger.info("Page loaded, extracting forms...")
             
             # Extract forms using sync JS evaluation
             html_content = page.content()
@@ -168,11 +172,11 @@ def _sync_get_form_schema(
             if not forms_data:
                 forms_data = page.evaluate(_get_standard_extraction_js())
             
-            print(f"✓ Found {len(forms_data)} form(s)")
+            logger.info(f"Found {len(forms_data)} form(s)")
             
             # Click custom dropdowns to extract options (BEFORE closing browser)
             if not is_google_form and forms_data:
-                print("🔽 Extracting custom dropdown options...")
+                logger.info("Extracting custom dropdown options...")
                 forms_data = _sync_extract_custom_dropdown_options(page, forms_data)
             
             browser.close()
@@ -237,7 +241,7 @@ def _sync_extract_custom_dropdown_options(page, forms_data: List[Dict]) -> List[
         if not custom_dropdowns:
             return forms_data
         
-        print(f"   🔽 Found {len(custom_dropdowns)} custom dropdown(s) to expand...")
+        logger.info(f"Found {len(custom_dropdowns)} custom dropdown(s) to expand...")
         
         for field in custom_dropdowns:
             try:
@@ -280,18 +284,18 @@ def _sync_extract_custom_dropdown_options(page, forms_data: List[Dict]) -> List[
                     
                     if options:
                         field['options'] = options
-                        print(f"   ✓ Extracted {len(options)} options for '{label}'")
+                        logger.info(f"Extracted {len(options)} options for '{label}'")
                     
                     # Close dropdown
                     page.keyboard.press('Escape')
                     time.sleep(0.2)
                     
             except Exception as e:
-                print(f"   ⚠️ Could not extract options for dropdown: {e}")
+                logger.warning(f"Could not extract options for dropdown: {e}")
                 continue
                 
     except Exception as e:
-        print(f"   ⚠️ Custom dropdown extraction error: {e}")
+        logger.warning(f"Custom dropdown extraction error: {e}")
     
     return forms_data
 
@@ -351,7 +355,7 @@ def _merge_manual_fields(extracted_forms: List[Dict], manual_fields: List[Dict])
     if not manual_fields:
         return extracted_forms
         
-    print(f"🛠️ Merging {len(manual_fields)} manual field(s)...")
+    logger.info(f"Merging {len(manual_fields)} manual field(s)...")
     
     # Convert manual fields to standard format
     formatted_manual = []
@@ -388,7 +392,7 @@ def _merge_manual_fields(extracted_forms: List[Dict], manual_fields: List[Dict])
     for manual in formatted_manual:
         name = manual['name']
         if name in existing_names:
-            print(f"   Using manual override for field '{name}'")
+            logger.info(f"Using manual override for field '{name}'")
             main_form['fields'][existing_names[name]] = manual
         else:
             main_form['fields'].append(manual)
@@ -418,7 +422,7 @@ async def _async_get_form_schema(
             page = await context.new_page()
             await page.route("**/*", lambda r: r.abort() if r.request.resource_type in {"media", "font"} else r.continue_())
             
-            print(f"🔗 Navigating to {'Google Form' if is_google_form else 'page'}...")
+            logger.info(f"Navigating to {'Google Form' if is_google_form else 'page'}...")
             await page.goto(url, wait_until="domcontentloaded", timeout=120000)
             
             # Wait for content
@@ -431,17 +435,17 @@ async def _async_get_form_schema(
                     pass
                 await asyncio.sleep(2)
             
-            print("✓ Page loaded, extracting forms...")
+            logger.info("Page loaded, extracting forms...")
             
             # Extract forms
             forms_data = await _extract_google_forms(page) if is_google_form else await _extract_all_frames(page, url)
             
             # Click custom dropdowns to extract options
             if not is_google_form and forms_data:
-                print("🔽 Extracting custom dropdown options...")
+                logger.info("Extracting custom dropdown options...")
                 forms_data = await _extract_custom_dropdown_options(page, forms_data)
             
-            print(f"✓ Found {len(forms_data)} form(s)")
+            logger.info(f"Found {len(forms_data)} form(s)")
             
             try:
                 await page.unroute_all(behavior='ignoreErrors')
@@ -477,7 +481,7 @@ async def _async_get_form_schema(
             return result
             
     except Exception as e:
-        print(f"❌ Scraping failed: {e}")
+        logger.error(f"Scraping failed: {e}")
         import traceback
         traceback.print_exc()
         return {'forms': [], 'url': url, 'error': str(e)}
@@ -508,7 +512,7 @@ async def _extract_custom_dropdown_options(page, forms_data: List[Dict]) -> List
         if not custom_dropdowns:
             return forms_data
         
-        print(f"   Found {len(custom_dropdowns)} custom dropdown(s) to expand...")
+        logger.info(f"Found {len(custom_dropdowns)} custom dropdown(s) to expand...")
         
         # Click each dropdown to reveal options
         for field in custom_dropdowns:
@@ -548,14 +552,14 @@ async def _extract_custom_dropdown_options(page, forms_data: List[Dict]) -> List
                     
                     if options:
                         field['options'] = options
-                        print(f"   ✓ Extracted {len(options)} options for '{label}'")
+                        logger.info(f"Extracted {len(options)} options for '{label}'")
                     
                     # Close dropdown by clicking elsewhere or pressing Escape
                     await page.keyboard.press('Escape')
                     await asyncio.sleep(0.3)
                     
             except Exception as e:
-                print(f"   ⚠️ Could not extract options for dropdown: {e}")
+                logger.warning(f"Could not extract options for dropdown: {e}")
                 continue
         
     except Exception as e:
@@ -582,15 +586,15 @@ async def _extract_all_frames(page, url: str) -> List[Dict]:
             blocked_providers = [f for f in third_party_forms 
                                if f.accessibility == ProviderAccessibility.CROSS_ORIGIN]
             if blocked_providers:
-                print(f"⚠️ Detected {len(blocked_providers)} third-party form provider(s):")
+                logger.warning(f"Detected {len(blocked_providers)} third-party form provider(s):")
                 for tp in blocked_providers:
-                    print(f"   - {tp.provider}: {tp.warning_message}")
+                    logger.warning(f"   - {tp.provider}: {tp.warning_message}")
         
         third_party_warnings = await get_third_party_warnings(page)
     except ImportError:
         pass  # Third-party detection not available
     except Exception as e:
-        print(f"⚠️ Third-party detection error: {e}")
+        logger.warning(f"Third-party detection error: {e}")
     
     for frame in page.frames:
         if frame.url in seen_urls or frame.is_detached():
@@ -614,11 +618,11 @@ async def _extract_all_frames(page, url: str) -> List[Dict]:
                         )
                         break
             else:
-                print(f">> Frame error: {e}")
+                logger.warning(f"Frame error: {e}")
     
     # BeautifulSoup fallback
     if not forms_data:
-        print(">> Trying BeautifulSoup fallback...")
+        logger.info("Trying BeautifulSoup fallback...")
         try:
             forms_data = _extract_with_beautifulsoup(await page.content())
         except:
@@ -1172,7 +1176,7 @@ def _process_forms(forms_data: List[Dict]) -> List[Dict]:
         
         combined = f"{form_id} {form_name} {form_action}"
         if any(kw in combined for kw in EXCLUDE_KEYWORDS):
-            print(f"⏭️ Skipping excluded form: {form_id or form_name or form_action}")
+            logger.info(f"Skipping excluded form: {form_id or form_name or form_action}")
             continue
         
         visible_fields = [f for f in form.get("fields", []) if not f.get("hidden") and f.get("type") != "hidden"]
@@ -1180,7 +1184,7 @@ def _process_forms(forms_data: List[Dict]) -> List[Dict]:
         if len(visible_fields) < 3:
             field_names = [f.get("name", "") for f in visible_fields]
             if not any(kw in str(field_names).lower() for kw in ['message', 'comment', 'feedback', 'contact']):
-                print(f"⏭️ Skipping small form with {len(visible_fields)} visible field(s)")
+                logger.info(f"Skipping small form with {len(visible_fields)} visible field(s)")
                 continue
         
         processed = {
@@ -1255,7 +1259,7 @@ def _generate_speech(fields: List[Dict]) -> Dict:
         all_fields = [f for form in fields for f in form.get('fields', [])]
         return service.generate_form_speech(all_fields)
     except Exception as e:
-        print(f"⚠️ Speech generation failed: {e}")
+        logger.warning(f"Speech generation failed: {e}")
         return {}
 
 

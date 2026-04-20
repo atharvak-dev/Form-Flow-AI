@@ -25,8 +25,6 @@ from services.ai.profile.service import generate_profile_background
 from utils.cache import get_cached, set_cached
 from utils.ws import emit_field_filled
 from routers.websocket import manager
-from utils.cache import get_cached, set_cached
-import hashlib
 
 # --- Pydantic Models ---
 class ScrapeRequest(BaseModel):
@@ -255,7 +253,7 @@ async def comprehensive_form_setup(
         conversational_flow = None
         if data.auto_generate_flow and gemini_service:
             flow_result = gemini_service.generate_conversational_flow({}, processed_data["form_schema"])
-            if flow_result["success"]:
+            if flow_result.get("success"):
                 conversational_flow = flow_result["conversational_flow"]
         
         return {
@@ -320,7 +318,7 @@ async def generate_conversational_flow(
             data.form_schema
         )
         
-        if result["success"]:
+        if result.get("success"):
             return {
                 "message": "Conversational flow generated successfully",
                 "flow": result["conversational_flow"],
@@ -329,7 +327,7 @@ async def generate_conversational_flow(
                 "remaining_count": len(result["remaining_fields"])
             }
         else:
-            raise HTTPException(status_code=500, detail=f"Flow generation failed: {result['error']}")
+            raise HTTPException(status_code=500, detail=f"Flow generation failed: {result.get('error', 'Unknown error')}")
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Conversational flow generation failed: {str(e)}")
@@ -598,7 +596,7 @@ async def submit_form(
 
         return {
             "message": result.get("message", "Form submission completed"),
-            "success": result["success"],
+            "success": result.get("success", False),
             "details": result,
             "submitted_data": formatted_data
         }

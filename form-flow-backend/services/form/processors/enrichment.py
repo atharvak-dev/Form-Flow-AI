@@ -7,7 +7,10 @@ import os
 import re
 from typing import List, Dict, Any
 
+from utils.logging import get_logger
 from ..utils.constants import FIELD_PATTERNS
+
+logger = get_logger(__name__)
 
 
 def process_forms(forms_data: List[Dict]) -> List[Dict]:
@@ -26,7 +29,7 @@ def process_forms(forms_data: List[Dict]) -> List[Dict]:
         # Check if form ID/name/action contains exclude keywords
         combined = f"{form_id} {form_name} {form_action}"
         if any(kw in combined for kw in EXCLUDE_KEYWORDS):
-            print(f"⏭️ Skipping excluded form: {form_id or form_name or form_action}")
+            logger.info(f"Skipping excluded form: {form_id or form_name or form_action}")
             continue
         
         # Filter out hidden fields and get visible field count
@@ -37,7 +40,7 @@ def process_forms(forms_data: List[Dict]) -> List[Dict]:
             field_names = [f.get("name", "") for f in visible_fields]
             # Unless it's specifically a contact/feedback form with few fields
             if not any(kw in str(field_names).lower() for kw in ['message', 'comment', 'feedback', 'contact']):
-                print(f"⏭️ Skipping small form with {len(visible_fields)} visible field(s)")
+                logger.info(f"Skipping small form with {len(visible_fields)} visible field(s)")
                 continue
         
         processed = {
@@ -118,7 +121,7 @@ def generate_speech(fields: List[Dict]) -> Dict:
         service = SpeechService(api_key=os.getenv('ELEVENLABS_API_KEY'))
         return service.generate_form_speech(fields)
     except Exception as e:
-        print(f"⚠️ Speech generation failed: {e}")
+        logger.warning(f"Speech generation failed: {e}")
         return {}
 
 

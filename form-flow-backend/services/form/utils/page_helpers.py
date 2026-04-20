@@ -7,7 +7,10 @@ import asyncio
 import json
 from typing import Dict, Any
 
+from utils.logging import get_logger
 from .constants import EXPANDABLE_SECTION_SELECTORS
+
+logger = get_logger(__name__)
 
 
 async def wait_for_dom_stability(page, timeout_ms: int = 10000, stability_ms: int = 500) -> str:
@@ -53,7 +56,7 @@ async def wait_for_dom_stability(page, timeout_ms: int = 10000, stability_ms: in
             }})
         """)
     except Exception as e:
-        print(f"  ⚠️ DOM stability wait error: {e}")
+        logger.warning(f"DOM stability wait error: {e}")
         await asyncio.sleep(2)
         return 'error'
 
@@ -90,7 +93,7 @@ async def expand_hidden_sections(page) -> int:
         await asyncio.sleep(0.5)  # Wait for animations
         return expanded
     except Exception as e:
-        print(f"  ⚠️ Section expansion error: {e}")
+        logger.warning(f"Section expansion error: {e}")
         return 0
 
 
@@ -136,7 +139,7 @@ async def scroll_and_detect_lazy_fields(page) -> int:
             }
         """)
     except Exception as e:
-        print(f"  ⚠️ Scroll detection error: {e}")
+        logger.warning(f"Scroll detection error: {e}")
         return 0
 
 

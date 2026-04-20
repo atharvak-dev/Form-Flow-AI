@@ -6,8 +6,11 @@ Handles navigation through multi-step forms to collect all fields.
 import asyncio
 import json
 from typing import List, Dict, Any
+from utils.logging import get_logger
 from ..utils.constants import WIZARD_INDICATORS, WIZARD_NEXT_BUTTON_SELECTORS
 from ..utils.page_helpers import wait_for_dom_stability
+
+logger = get_logger(__name__)
 
 # RAG service for semantic field understanding
 try:
@@ -210,7 +213,7 @@ async def navigate_wizard_and_extract(page, extract_fn) -> List[Dict]:
     if not is_wizard:
         return []
     
-    print("🔄 Detected wizard form, navigating through steps...")
+    logger.info("Detected wizard form, navigating through steps...")
     
     all_forms = []
     visited_steps = set()
@@ -227,7 +230,7 @@ async def navigate_wizard_and_extract(page, extract_fn) -> List[Dict]:
             break
         visited_steps.add(step_key)
         
-        print(f"  📋 Step {step_info['currentStep']}/{step_info['totalSteps']}: {step_info.get('stepTitle', 'Untitled')}")
+        logger.info(f"Step {step_info['currentStep']}/{step_info['totalSteps']}: {step_info.get('stepTitle', 'Untitled')}")
         
         # Extract fields from current step
         try:
@@ -241,7 +244,7 @@ async def navigate_wizard_and_extract(page, extract_fn) -> List[Dict]:
                 
             all_forms.extend(step_forms)
         except Exception as e:
-            print(f"    ⚠️ Error extracting step: {e}")
+            logger.warning(f"Error extracting step: {e}")
         
         # Try to click "Next"
         next_clicked = await click_next_button(page)
@@ -262,7 +265,7 @@ async def navigate_wizard_and_extract(page, extract_fn) -> List[Dict]:
             break
         await asyncio.sleep(0.3)
     
-    print(f"✓ Collected fields from {len(visited_steps)} wizard steps")
+    logger.info(f"Collected fields from {len(visited_steps)} wizard steps")
     
     # Enrich fields with RAG semantic understanding
     all_forms = enrich_fields_with_rag(all_forms, form_id="wizard_form")

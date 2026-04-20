@@ -5,6 +5,9 @@ import re
 import asyncio
 from services.form.parser import format_email_input
 from config.settings import settings
+from utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class VoiceProcessor:
@@ -26,12 +29,12 @@ class VoiceProcessor:
                     timeout=15.0
                 )
                 self.model = "google/gemma-3-27b-it"
-                print(f"✅ VoiceProcessor initialized with OpenRouter ({self.model})")
+                logger.info(f"VoiceProcessor initialized with OpenRouter ({self.model})")
             except Exception as e:
-                print(f"⚠️ Failed to initialize OpenRouter client: {e}")
+                logger.warning(f"Failed to initialize OpenRouter client: {e}")
                 self.client = None
         else:
-            print("⚠️ OPENROUTER_API_KEY not configured - LLM features disabled")
+            logger.warning("OPENROUTER_API_KEY not configured - LLM features disabled")
 
     def analyze_form_context(self, form_schema: List[Dict]) -> str:
         """Analyze form structure and create context for intelligent prompts"""
@@ -100,8 +103,8 @@ class VoiceProcessor:
                 local_result = await local_llm.extract_field_value_async(transcript, field_name)
                 
                 # If Local LLM is confident, return immediately!
-                if local_result.get('confidence', 0) > 0.6:
-                    print(f"⚡ Local LLM Hit: {local_result['value']} (conf: {local_result['confidence']})")
+                if local_result and local_result.get('confidence', 0) > 0.6:
+                    logger.info(f"Local LLM Hit: {local_result['value']} (conf: {local_result['confidence']})")
                     return {
                         "processed_text": local_result['value'],
                         "confidence": local_result['confidence'],
@@ -109,7 +112,7 @@ class VoiceProcessor:
                         "source": "local_phi2"
                     }
         except Exception as e:
-            print(f"⚠️ Local LLM skipped: {e}")
+            logger.warning(f"Local LLM skipped: {e}")
 
         # 2. Fallback to OpenRouter (Cloud)
         if not self.client:
@@ -252,7 +255,7 @@ class VoiceProcessor:
             return result
             
         except Exception as e:
-            print(f"⚠️ OpenRouter voice processing error: {e}")
+            logger.warning(f"OpenRouter voice processing error: {e}")
             processed_text = self._format_field_input(transcript, field_info)
             return {
                 "processed_text": processed_text,
@@ -327,7 +330,7 @@ Respond in JSON:
                     result["suggestion"] = self._format_email_from_voice(result.get("suggestion", ""))
                 return result
             except Exception as e:
-                print(f"⚠️ OpenRouter pronunciation validation error: {e}")
+                logger.warning(f"OpenRouter pronunciation validation error: {e}")
                 suggestion = self._format_field_input(transcript, field_info)
                 return {"needs_confirmation": True, "suggestion": suggestion, "confidence": 0.5}
         
