@@ -10,13 +10,15 @@ Endpoints:
     GET /history - Get user's form submission history
 """
 
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 from datetime import timedelta
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from core import models, schemas, database
 import auth as auth_utils
@@ -25,6 +27,7 @@ from utils.logging import get_logger
 logger = get_logger(__name__)
 
 router = APIRouter(tags=["Authentication & Users"])
+limiter = Limiter(key_func=get_remote_address)
 
 
 # =============================================================================
@@ -41,7 +44,9 @@ router = APIRouter(tags=["Authentication & Users"])
         400: {"description": "Email already registered"},
     }
 )
+@limiter.limit("5/minute")
 async def register(
+    request: Request,
     user: schemas.UserCreate,
     db: AsyncSession = Depends(database.get_db)
 ):
@@ -109,7 +114,9 @@ async def register(
         401: {"description": "Invalid credentials"},
     }
 )
+@limiter.limit("10/minute")
 async def login_for_access_token(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(database.get_db)
 ):

@@ -51,13 +51,16 @@ async def get_redis_client():
     try:
         import redis.asyncio as redis
         
-        _redis_client = redis.from_url(
+        # Create connection pool for better connection management
+        pool = redis.ConnectionPool.from_url(
             settings.REDIS_URL,
             encoding="utf-8",
             decode_responses=True,
             socket_timeout=5,
             socket_connect_timeout=5,
+            max_connections=10,
         )
+        _redis_client = redis.Redis(connection_pool=pool)
         
         # Test connection
         await _redis_client.ping()

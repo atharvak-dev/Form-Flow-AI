@@ -47,7 +47,7 @@ from utils.exceptions import FormFlowError
 from utils.rate_limit import limiter, rate_limit_exceeded_handler
 
 # Import Routers
-from routers import auth, forms, speech, conversation, advanced_voice, analytics, websocket, local_llm, pdf, suggestions, docx, profile, snippets, plugins, attachments
+from routers import auth, forms, speech, conversation, advanced_voice, analytics, websocket, local_llm, pdf, suggestions, docx, profile, snippets, plugins, attachments, webhooks
 
 # Initialize logging
 setup_logging()
@@ -73,6 +73,23 @@ async def lifespan(app: FastAPI):
     # Initialize ThreadPoolExecutor for background AI inference (max 2 workers)
     app.state.thread_pool = ThreadPoolExecutor(max_workers=2)
     logger.info("Initialized AI ThreadPoolExecutor (max_workers=2)")
+
+    # Warm up cache - pre-load Redis connection
+    async def warmup_cache():
+        try:
+            from utils.cache import get_redis_client
+            redis = await get_redis_client()
+            if redis:
+                # Test basic operations
+                await redis.ping()
+                logger.info("Cache warming: Redis connection verified")
+            else:
+                logger.info("Cache warming: Using in-memory fallback")
+        except Exception as e:
+            logger.warning(f"Cache warming skipped: {e}")
+    
+    # Run cache warming in background
+    asyncio.create_task(warmup_cache())
 
     # Start periodic cleanup of temp files
     async def cleanup_temp_files():
@@ -235,6 +252,7 @@ app.include_router(profile.router)
 app.include_router(snippets.router)
 app.include_router(plugins.router)
 app.include_router(attachments.router)
+app.include_router(webhooks.router)
 
 
 # =============================================================================

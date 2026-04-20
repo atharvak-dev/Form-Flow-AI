@@ -145,6 +145,22 @@ class Settings(BaseSettings):
         return f"chrome-extension://({'|'.join(ext_ids)})"
     
     # ==========================================================================
+    # Webhook Configuration
+    # ==========================================================================
+    WEBHOOK_MAX_PER_USER: int = Field(
+        default=5,
+        description="Maximum webhooks per user"
+    )
+    WEBHOOK_TIMEOUT_SECONDS: int = Field(
+        default=10,
+        description="Timeout for webhook HTTP requests"
+    )
+    WEBHOOK_RETRY_ATTEMPTS: int = Field(
+        default=3,
+        description="Number of retry attempts for failed webhook deliveries"
+    )
+    
+    # ==========================================================================
     # Application Settings
     # ==========================================================================
     DEBUG: bool = Field(

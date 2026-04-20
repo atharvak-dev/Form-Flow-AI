@@ -215,3 +215,58 @@ class FlowEngineResponse(BaseModel):
     snippets_expanded: List[str] = Field(default_factory=list)
     confidence: float = Field(default=1.0)
 
+
+# =============================================================================
+# Webhook Schemas
+# =============================================================================
+
+class WebhookBase(BaseModel):
+    """Base webhook schema."""
+    url: str = Field(..., max_length=500, description="Webhook URL (HTTPS only)")
+    events: List[str] = Field(
+        default_factory=lambda: ["form.submitted"],
+        description="Event types to subscribe to"
+    )
+
+
+class WebhookCreate(WebhookBase):
+    """Schema for creating a webhook."""
+    pass
+
+
+class WebhookUpdate(BaseModel):
+    """Schema for updating a webhook."""
+    url: Optional[str] = Field(None, max_length=500)
+    events: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+
+
+class WebhookResponse(WebhookBase):
+    """Schema for webhook response."""
+    id: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WebhookCreateResponse(WebhookResponse):
+    """Schema for webhook creation response (includes secret)."""
+    secret: str = Field(..., description="Secret for signature verification (shown only once)")
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WebhookDeliveryLogResponse(BaseModel):
+    """Schema for webhook delivery log response."""
+    id: str
+    event: str
+    status: str
+    response_code: Optional[int]
+    attempts: int
+    created_at: datetime
+    delivered_at: Optional[datetime]
+    
+    model_config = ConfigDict(from_attributes=True)
+

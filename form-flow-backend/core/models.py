@@ -90,6 +90,12 @@ class User(Base):
         lazy="selectin",
         cascade="all, delete-orphan"
     )
+    webhooks = relationship(
+        "Webhook",
+        back_populates="user",
+        lazy="selectin",
+        cascade="all, delete-orphan"
+    )
     
     def __repr__(self) -> str:
         """String representation for debugging."""
@@ -270,3 +276,93 @@ class Snippet(Base):
     
     def __repr__(self) -> str:
         return f"<Snippet(id={self.id}, trigger='{self.trigger_phrase}')>"
+
+
+class Webhook(Base):
+    """
+    Webhook configuration for form events.
+    
+    Stores webhook URLs and configuration for delivering
+    form submission events to external systems.
+    
+    Attributes:
+        id: Primary key (UUID)
+        user_id: Foreign key to User
+        url: Webhook URL (HTTPS only)
+        events: List of event types to subscribe to
+        secret: Auto-generated secret for signature verification
+        is_active: Whether webhook is enabled
+        created_at: Creation timestamp
+        updated_at: Last update timestamp
+    """
+    
+    __tablename__ = "webhooks"
+    
+    import uuid
+    from sqlalchemy.dialects.postgresql import UUID, JSONB
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    url = Column(String(500), nullable=False)
+    events = Column(JSONB, default=[], nullable=False)
+    secret = Column(String(64), nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    user = relationship("User", back_populates="webhooks")
+    delivery_logs = relationship("WebhookDeliveryLog", back_populates="webhook", cascade="all, delete-orphan")
+    
+    def __repr__(self) -> str:
+        return f"<Webhook(id={self.id}, url='{self.url}', events={self.events})>"
+
+
+class WebhookDeliveryLog(Base):
+    """
+    Log of webhook delivery attempts.
+    
+    Tracks delivery status for debugging and monitoring.
+    
+    Attributes:
+        id: Primary key (UUID)
+        webhook_id: Foreign key to Webhook
+        event: Event type
+        payload: JSON payload sent
+        status: Delivery status (pending/success/failed)
+        response_code: HTTP response code
+        response_body: Truncated response body
+        attempts: Number of delivery attempts
+        created_at: Creation timestamp
+        delivered_at: Completion timestamp
+    """
+    
+    __tablename__ = "webhook_delivery_logs"
+    
+    import uuid
+    from sqlalchemy.dialects.postgresql import UUID, JSONB
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    webhook_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("webhooks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    event = Column(String(50), nullable=False)
+    payload = Column(JSONB, nullable=False)
+    status = Column(String(20), default="pending", nullable=False)
+    response_code = Column(Integer)
+    response_body = Column(Text)
+    attempts = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    delivered_at = Column(DateTime(timezone=True))
+    
+    webhook = relationship("Webhook", back_populates="delivery_logs")
+    
+    def __repr__(self) -> str:
+        return f"<WebhookDeliveryLog(id={self.id}, event='{self.event}', status='{self.status}')>"

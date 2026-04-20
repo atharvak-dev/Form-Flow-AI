@@ -5,10 +5,12 @@ from core import database, models
 import auth
 from config.settings import settings
 from typing import Dict, List, Any, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 import asyncio
 import json
 import hashlib
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from services.form.parser import get_form_schema, create_template
 from core.dependencies import (
@@ -22,13 +24,27 @@ from services.ai.gemini import GeminiService, SmartFormFillerChain
 from services.form.conventions import get_form_schema as get_schema
 from services.ai.smart_autofill import get_smart_autofill
 from services.ai.profile.service import generate_profile_background
+from services.webhook.service import get_webhook_service
 from utils.cache import get_cached, set_cached
 from utils.ws import emit_field_filled
 from routers.websocket import manager
 
+# --- Rate Limiter ---
+limiter = Limiter(key_func=get_remote_address)
+
 # --- Pydantic Models ---
 class ScrapeRequest(BaseModel):
     url: str
+    
+    @field_validator('url')
+    @classmethod
+    def validate_url(cls, v):
+        if not v or not v.strip():
+            raise ValueError("URL cannot be empty")
+        v = v.strip()
+        if not v.startswith(('http://', 'https://')):
+            raise ValueError("URL must start with http:// or https://")
+        return v
 
 class VoiceProcessRequest(BaseModel):
     transcript: str
@@ -44,6 +60,34 @@ class FormSubmitRequest(BaseModel):
     form_data: Dict[str, Any]
     form_schema: List[Dict[str, Any]]
     use_cdp: bool = False  # If True, connect to user's browser via Chrome DevTools Protocol
+    
+    @field_validator('url')
+    @classmethod
+    def validate_url(cls, v):
+        if not v or not v.strip():
+            raise ValueError("URL cannot be empty")
+        v = v.strip()
+        if not v.startswith(('http://', 'https://')):
+            raise ValueError("URL must start with http:// or https://")
+        return v
+    
+    @field_validator('form_data')
+    @classmethod
+    def validate_form_data(cls, v):
+        if not isinstance(v, dict):
+            raise ValueError("form_data must be a dictionary")
+        if not v:
+            raise ValueError("form_data cannot be empty")
+        return v
+    
+    @field_validator('form_schema')
+    @classmethod
+    def validate_form_schema(cls, v):
+        if not isinstance(v, list):
+            raise ValueError("form_schema must be a list")
+        if not v:
+            raise ValueError("form_schema cannot be empty")
+        return v
 
 class ConversationalFlowRequest(BaseModel):
     extracted_fields: Dict[str, Any]
@@ -127,6 +171,7 @@ async def _process_scraped_form(
 
 
 @router.post("/scrape")
+@limiter.limit("10/minute")
 async def scrape_form(
     data: ScrapeRequest,
     request: Request,
@@ -218,6 +263,17 @@ async def scrape_form(
         else:
             print("⚠️ No Bearer token in request - user not logged in")
 
+
+        # Trigger webhook for form.scraped event
+        try:
+            webhook_service = await get_webhook_service(db)
+            await webhook_service.queue_event("form.scraped", {
+                "form_url": data.url,
+                "fields_count": len(processed_data.get("forms", [{}])[0].get("fields", [])) if processed_data.get("forms") else 0,
+                "form_count": len(processed_data.get("forms", []))
+            })
+        except Exception as e:
+            logger.warning(f"Webhook trigger failed: {e}")
 
         return {
             "message": "Form scraped and analyzed successfully",
@@ -499,6 +555,7 @@ async def magic_fill(
 
 
 @router.post("/submit-form")
+@limiter.limit("20/minute")
 async def submit_form(
     data: FormSubmitRequest, 
     request: Request,
@@ -593,6 +650,20 @@ async def submit_form(
                     print(f"⚠️ Failed to record history (Auth error): {e}")
         except Exception as e:
             print(f"⚠️ History tracking error: {e}")
+
+        # Trigger webhook events
+        try:
+            webhook_service = await get_webhook_service(db)
+            event_type = "form.submitted" if result.get("success") else "form.failed"
+            await webhook_service.queue_event(event_type, {
+                "form_url": data.url,
+                "submission_id": submission.id if 'submission' in dir() else None,
+                "user_id": user.id if 'user' in dir() else None,
+                "fields_count": len(formatted_data) if formatted_data else 0,
+                "success": result.get("success", False)
+            })
+        except Exception as e:
+            logger.warning(f"Webhook trigger failed: {e}")
 
         return {
             "message": result.get("message", "Form submission completed"),
