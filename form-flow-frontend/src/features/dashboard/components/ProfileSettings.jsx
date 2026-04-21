@@ -37,15 +37,15 @@ export function ProfileSettings() {
     const [message, setMessage] = useState(null)
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
-    // Theme styles
+    // Theme styles — unified emerald/primary green
     const cardBgClass = isDark
-        ? "bg-black/40 border-white/10 backdrop-blur-xl"
-        : "bg-white/60 border-zinc-200 backdrop-blur-xl shadow-lg"
+        ? "bg-zinc-900/40 border-white/[0.08] backdrop-blur-xl"
+        : "bg-white/80 border-zinc-200 backdrop-blur-xl shadow-[0_2px_8px_rgba(0,0,0,0.04)]"
     const textClass = isDark ? "text-white" : "text-zinc-900"
-    const subTextClass = isDark ? "text-white/60" : "text-zinc-500"
-    const accentClass = isDark ? "text-purple-400" : "text-purple-600"
+    const subTextClass = isDark ? "text-white/50" : "text-zinc-500"
+    const accentClass = isDark ? "text-emerald-400" : "text-emerald-600"
     const inputClass = isDark
-        ? "bg-black/40 border-white/20 text-white placeholder-white/30"
+        ? "bg-black/40 border-white/[0.1] text-white placeholder-white/30"
         : "bg-white border-zinc-300 text-zinc-900 placeholder-zinc-400"
 
     // Fetch data on mount
@@ -206,13 +206,13 @@ export function ProfileSettings() {
                             animate={{ opacity: 1, x: 0 }}
                             transition={{ delay: index * 0.1 }}
                             className={`relative ${isFirstSection ? '' : 'pl-4 border-l-2'} ${isDark
-                                ? 'border-purple-500/30'
-                                : 'border-purple-300'
+                                ? 'border-emerald-500/30'
+                                : 'border-emerald-300'
                                 }`}
                         >
                             {/* Section header */}
                             <div className="flex items-center gap-2 mb-3">
-                                <div className={`p-1.5 rounded-md ${isDark ? 'bg-purple-500/20' : 'bg-purple-100'}`}>
+                                <div className={`p-1.5 rounded-md ${isDark ? 'bg-emerald-500/10' : 'bg-emerald-50'}`}>
                                     <Icon className={`w-4 h-4 ${accentClass}`} />
                                 </div>
                                 <h4 className={`text-sm font-semibold uppercase tracking-wider ${subTextClass}`}>
@@ -224,8 +224,8 @@ export function ProfileSettings() {
                             {section.content && (
                                 <div className={`p-4 rounded-xl ${isFirstSection
                                     ? isDark
-                                        ? 'bg-gradient-to-br from-purple-900/20 to-transparent border border-purple-500/20'
-                                        : 'bg-gradient-to-br from-purple-50 to-white border border-purple-100'
+                                        ? 'bg-gradient-to-br from-emerald-900/20 to-transparent border border-emerald-500/20'
+                                        : 'bg-gradient-to-br from-emerald-50 to-white border border-emerald-100'
                                     : isDark
                                         ? 'bg-white/5'
                                         : 'bg-zinc-50'
@@ -247,7 +247,7 @@ export function ProfileSettings() {
                                                 : 'hover:bg-zinc-50'
                                                 }`}
                                         >
-                                            <span className={`mt-1 flex-shrink-0 w-1.5 h-1.5 rounded-full ${isDark ? 'bg-purple-400' : 'bg-purple-500'
+                                            <span className={`mt-1 flex-shrink-0 w-1.5 h-1.5 rounded-full ${isDark ? 'bg-emerald-400' : 'bg-emerald-500'
                                                 }`} />
                                             <span className={`text-sm ${textClass}`}>{point}</span>
                                         </div>
@@ -294,8 +294,8 @@ export function ProfileSettings() {
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDark ? 'bg-purple-500/20' : 'bg-purple-100'}`}>
-                        <BookOpen className={`w-5 h-5 ${isDark ? 'text-purple-400' : 'text-purple-600'}`} />
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${isDark ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-emerald-50 border-emerald-200'}`}>
+                        <BookOpen className={`w-5 h-5 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`} />
                     </div>
                     <div>
                         <h2 className={`font-semibold ${textClass}`}>Personal Case Study</h2>
@@ -416,7 +416,7 @@ export function ProfileSettings() {
                                 value={editText}
                                 onChange={(e) => setEditText(e.target.value)}
                                 rows={20}
-                                className={`w-full p-4 rounded-xl border font-mono text-xs resize-y focus:outline-none focus:ring-2 focus:ring-purple-500/50 ${inputClass}`}
+                                className={`w-full p-4 rounded-xl border font-mono text-xs resize-y focus:outline-none focus:ring-2 focus:ring-emerald-500/50 ${inputClass}`}
                                 placeholder="{ ... }"
                             />
                             <div className="flex items-center justify-end gap-2">
@@ -433,7 +433,7 @@ export function ProfileSettings() {
                                 <button
                                     onClick={handleSaveEdit}
                                     disabled={saving}
-                                    className="px-3 py-1.5 rounded-lg text-sm bg-purple-500 text-white hover:bg-purple-600 disabled:opacity-50"
+                                    className="px-3 py-1.5 rounded-lg text-sm bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50"
                                 >
                                     {saving ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <Save className="w-4 h-4 inline mr-1" />}
                                     Save JSON

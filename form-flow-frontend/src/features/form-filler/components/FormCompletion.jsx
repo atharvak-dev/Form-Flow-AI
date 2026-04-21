@@ -13,9 +13,14 @@ const FormCompletion = ({ formData, formSchema, originalUrl, pdfId, onReset }) =
     // Create lookup from field.name to human-readable label
     const fieldLabels = useMemo(() => {
         const labels = {};
-        formSchema?.forEach(form => {
-            form.fields?.forEach(field => {
-                labels[field.name] = field.label || field.display_name || field.name;
+        if (!formSchema || !Array.isArray(formSchema)) return labels;
+        
+        formSchema.forEach(form => {
+            if (!form || !form.fields || !Array.isArray(form.fields)) return;
+            form.fields.forEach(field => {
+                if (field && field.name) {
+                    labels[field.name] = field.label || field.display_name || field.name;
+                }
             });
         });
         return labels;
@@ -24,24 +29,29 @@ const FormCompletion = ({ formData, formSchema, originalUrl, pdfId, onReset }) =
     // Auto-generate profile on completion
     React.useEffect(() => {
         const updateProfile = async () => {
-            if (formData && Object.keys(formData).length > 0) {
-                setProfileUpdateStatus('updating');
-                try {
-                    const response = await generateProfile(formData, "Web Form", "Form Completion");
-                    if (response.success) {
-                        setProfileUpdateStatus('success');
-                    } else {
-                        console.warn("Profile update API returned false:", response.message);
-                        setProfileUpdateStatus('error');
-                    }
-                } catch (error) {
-                    console.error("Profile update failed:", error);
+            // Guard: Check formData exists and has entries
+            if (!formData || typeof formData !== 'object' || Object.keys(formData).length === 0) {
+                return;
+            }
+            
+            setProfileUpdateStatus('updating');
+            try {
+                const response = await generateProfile(formData, "Web Form", "Form Completion");
+                // Check for explicit success flag or non-error response
+                if (response && response.success !== false) {
+                    setProfileUpdateStatus('success');
+                } else {
+                    console.warn("Profile update API returned false:", response?.message);
                     setProfileUpdateStatus('error');
                 }
+            } catch (error) {
+                console.error("Profile update failed:", error);
+                // Don't show error to user - profile is non-critical
+                setProfileUpdateStatus('error');
             }
         };
         updateProfile();
-    }, []);
+    }, [formData]);
 
     // Save rating to localStorage
     const handleRatingChange = (rating) => {
@@ -191,10 +201,10 @@ const FormCompletion = ({ formData, formSchema, originalUrl, pdfId, onReset }) =
                     <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden mb-6">
                         <div className="px-4 py-3 bg-white/5 border-b border-white/10 flex justify-between items-center">
                             <h3 className="font-semibold text-white/80 text-sm uppercase tracking-wider">Collected Information</h3>
-                            <span className="text-xs text-white/40 font-mono">{Object.keys(formData).length} fields</span>
+                            <span className="text-xs text-white/40 font-mono">{formData ? Object.keys(formData).length : 0} fields</span>
                         </div>
                         <div className="max-h-60 overflow-y-auto p-4 space-y-3">
-                            {Object.entries(formData).length > 0 ? (
+                            {formData && Object.keys(formData).length > 0 ? (
                                 Object.entries(formData).map(([key, value]) => (
                                     <div key={key} className="flex justify-between items-start text-sm group">
                                         <span className="text-white/50 font-mono capitalize shrink-0 pr-4 mt-0.5 group-hover:text-white/70 transition-colors">

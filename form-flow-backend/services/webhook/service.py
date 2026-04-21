@@ -20,10 +20,12 @@ from typing import List, Optional, Dict, Any
 from uuid import UUID
 from datetime import datetime
 
+from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from core import database
 from core.models import Webhook, WebhookDeliveryLog
 from core.schemas import WebhookCreate, WebhookUpdate
 from config.settings import settings
@@ -576,6 +578,6 @@ class WebhookService:
         return result.scalar_one_or_none()
 
 
-async def get_webhook_service(db: AsyncSession = None) -> WebhookService:
+async def get_webhook_service(db: AsyncSession = Depends(database.get_db)) -> WebhookService:
     """Dependency for getting webhook service."""
     return WebhookService(db)

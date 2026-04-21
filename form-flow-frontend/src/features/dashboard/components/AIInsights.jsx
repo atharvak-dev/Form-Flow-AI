@@ -2,6 +2,7 @@
  * AIInsights Component - Premium Redesign
  * 
  * Displays AI-generated insights with animated typing effect and premium styling.
+ * Redesigned with glassmorphism to match landing page FeatureCard aesthetic.
  */
 
 import { useState, useEffect } from 'react';
@@ -49,18 +50,21 @@ export function AIInsights({ insights, isLoading, onRefresh }) {
     const colorMap = {
         success: {
             bg: isDark ? 'bg-emerald-500/10' : 'bg-emerald-50',
-            text: 'text-emerald-500',
+            text: isDark ? 'text-emerald-400' : 'text-emerald-600',
             border: isDark ? 'border-emerald-500/20' : 'border-emerald-200',
+            glow: isDark ? 'shadow-[0_0_10px_rgba(16,185,129,0.1)]' : '',
         },
         tip: {
             bg: isDark ? 'bg-teal-500/10' : 'bg-teal-50',
-            text: 'text-teal-500',
+            text: isDark ? 'text-teal-400' : 'text-teal-600',
             border: isDark ? 'border-teal-500/20' : 'border-teal-200',
+            glow: isDark ? 'shadow-[0_0_10px_rgba(20,184,166,0.1)]' : '',
         },
         insight: {
-            bg: isDark ? 'bg-lime-500/10' : 'bg-lime-50',
-            text: 'text-lime-500',
-            border: isDark ? 'border-lime-500/20' : 'border-lime-200',
+            bg: isDark ? 'bg-emerald-500/10' : 'bg-emerald-50',
+            text: isDark ? 'text-emerald-400' : 'text-emerald-600',
+            border: isDark ? 'border-emerald-500/20' : 'border-emerald-200',
+            glow: isDark ? 'shadow-[0_0_10px_rgba(16,185,129,0.1)]' : '',
         },
     };
 
@@ -91,10 +95,13 @@ export function AIInsights({ insights, isLoading, onRefresh }) {
                             className="flex flex-col items-center justify-center gap-4 py-8"
                         >
                             <div className="relative">
-                                <div className="w-12 h-12 rounded-full border-2 border-emerald-500/20 border-t-emerald-500 animate-spin" />
-                                <Sparkles className="absolute inset-0 m-auto w-5 h-5 text-emerald-400" />
+                                <div className={`w-12 h-12 rounded-full border-2 animate-spin ${isDark
+                                    ? 'border-emerald-500/20 border-t-emerald-500'
+                                    : 'border-emerald-200 border-t-emerald-500'
+                                    }`} />
+                                <Sparkles className={`absolute inset-0 m-auto w-5 h-5 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`} />
                             </div>
-                            <p className={`text-sm ${isDark ? 'text-white/50' : 'text-zinc-500'}`}>
+                            <p className={`text-sm font-mono ${isDark ? 'text-white/40' : 'text-zinc-500'}`}>
                                 Analyzing patterns...
                             </p>
                         </motion.div>
@@ -116,12 +123,15 @@ export function AIInsights({ insights, isLoading, onRefresh }) {
                                         initial={{ opacity: 0, x: -10 }}
                                         animate={{ opacity: 1, x: 0 }}
                                         transition={{ delay: idx * 0.1 }}
-                                        className={`flex items-start gap-3 p-3 rounded-xl border ${colors.bg} ${colors.border}`}
+                                        className={`group/insight relative flex items-start gap-3 p-3 rounded-xl border transition-all duration-300 ${colors.bg} ${colors.border} ${colors.glow} hover:scale-[1.01]`}
                                     >
-                                        <div className={`mt-0.5 ${colors.text}`}>
+                                        {/* Hover spotlight */}
+                                        <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 via-transparent to-transparent opacity-0 group-hover/insight:opacity-100 transition-opacity duration-500 rounded-xl pointer-events-none" />
+
+                                        <div className={`mt-0.5 relative z-10 ${colors.text}`}>
                                             <Icon className="w-4 h-4" />
                                         </div>
-                                        <p className={`text-sm leading-relaxed flex-1 ${isDark ? 'text-white/80' : 'text-zinc-700'}`}>
+                                        <p className={`text-sm leading-relaxed flex-1 relative z-10 ${isDark ? 'text-white/80' : 'text-zinc-700'}`}>
                                             {item.text}
                                         </p>
                                     </motion.div>
@@ -136,14 +146,17 @@ export function AIInsights({ insights, isLoading, onRefresh }) {
                             exit={{ opacity: 0 }}
                             className="flex flex-col items-center justify-center gap-4 py-8 text-center"
                         >
-                            <div className={`w-16 h-16 rounded-2xl flex items-center justify-center ${isDark ? 'bg-white/5' : 'bg-zinc-100'}`}>
-                                <Sparkles className={`w-7 h-7 ${isDark ? 'text-white/20' : 'text-zinc-300'}`} />
+                            <div className={`w-16 h-16 rounded-2xl flex items-center justify-center border ${isDark
+                                ? 'bg-white/[0.03] border-white/[0.06]'
+                                : 'bg-zinc-50 border-zinc-200'
+                                }`}>
+                                <Sparkles className={`w-7 h-7 ${isDark ? 'text-white/15' : 'text-zinc-300'}`} />
                             </div>
                             <div>
                                 <p className={`font-medium ${isDark ? 'text-white/60' : 'text-zinc-600'}`}>
                                     No insights yet
                                 </p>
-                                <p className={`text-xs mt-1 ${isDark ? 'text-white/40' : 'text-zinc-400'}`}>
+                                <p className={`text-xs mt-1 ${isDark ? 'text-white/35' : 'text-zinc-400'}`}>
                                     Submit more forms to get AI-powered insights
                                 </p>
                             </div>

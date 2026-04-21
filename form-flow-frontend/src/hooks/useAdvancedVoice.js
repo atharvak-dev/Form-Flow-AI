@@ -69,6 +69,20 @@ const useAdvancedVoice = ({
     const recognitionRef = useRef(null);
     const sessionIdRef = useRef(generateSessionId());
     const isWakeWordActiveRef = useRef(false);
+    const isMountedRef = useRef(true);
+    const abortControllerRef = useRef(null);
+
+    // Track mount state to prevent state updates on unmounted components
+    useEffect(() => {
+        isMountedRef.current = true;
+        return () => {
+            isMountedRef.current = false;
+            // Cancel any pending API calls
+            if (abortControllerRef.current) {
+                abortControllerRef.current.abort();
+            }
+        };
+    }, []);
 
     // Initialize speech recognition
     useEffect(() => {
@@ -145,7 +159,10 @@ const useAdvancedVoice = ({
         recognitionRef.current = recognition;
 
         return () => {
-            recognition.abort();
+            if (recognitionRef.current) {
+                recognitionRef.current.abort();
+                recognitionRef.current = null;
+            }
         };
     }, [language, enableWakeWord]);
 
@@ -171,6 +188,12 @@ const useAdvancedVoice = ({
     const processInput = useCallback(async (text) => {
         if (!text.trim()) return;
 
+        // Cancel any pending request
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+        }
+        abortControllerRef.current = new AbortController();
+
         setIsProcessing(true);
         setNeedsClarification(false);
         setClarificationQuestion('');
@@ -188,7 +211,10 @@ const useAdvancedVoice = ({
                 userId,
                 formId,
                 sessionId: sessionIdRef.current
-            });
+            }, { signal: abortControllerRef.current.signal });
+
+            // Guard against unmounted component
+            if (!isMountedRef.current) return;
 
             // Handle different result types
             switch (result.type) {
@@ -233,11 +259,21 @@ const useAdvancedVoice = ({
             }
 
         } catch (err) {
+            // Ignore abort errors
+            if (err.name === 'AbortError' || err.name === 'CanceledError') {
+                return;
+            }
+            
+            // Guard against unmounted component
+            if (!isMountedRef.current) return;
+            
             console.error('Voice processing error:', err);
             setError(err.message);
             onError?.(err.message);
         } finally {
-            setIsProcessing(false);
+            if (isMountedRef.current) {
+                setIsProcessing(false);
+            }
         }
     }, [fieldName, fieldType, question, formContext, qaHistory, userId, formId,
         confidenceThreshold, autoConfirmThreshold, onResult, onCommand, onBatchResult, onError]);

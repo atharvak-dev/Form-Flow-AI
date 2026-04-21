@@ -32,7 +32,6 @@ router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
 
 
 async def get_current_user_webhook_service(
-    db: AsyncSession = Depends(database.get_db),
     service: WebhookService = Depends(get_webhook_service)
 ) -> tuple[int, WebhookService]:
     """

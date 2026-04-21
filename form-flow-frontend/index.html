@@ -5,6 +5,19 @@
   <meta charset="UTF-8" />
   <link rel="icon" type="image/png" href="/favicon.png" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  
+  <!-- Security: Content Security Policy -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self';
+    style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+    img-src 'self' data: blob:;
+    font-src 'self' https://fonts.gstatic.com;
+    connect-src 'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*;
+    base-uri 'self';
+    form-action 'self';
+  " />
+  
   <title>Form Flow AI</title>
 </head>
 

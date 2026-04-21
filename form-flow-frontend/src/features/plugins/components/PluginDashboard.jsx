@@ -5,6 +5,7 @@
 import { useState, useCallback, useMemo, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Toaster } from 'react-hot-toast';
+import { createPortal } from 'react-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import {
     Search, Plus, Filter, LayoutGrid, List, RefreshCw, Puzzle, ChevronLeft, X
@@ -234,10 +235,11 @@ function PluginDashboardContent() {
                 </div>
 
                 {/* Side panel - Floating Drawer Style */}
-                <AnimatePresence>
-                    {(showAPIKeys || showEmbedCode || showTester) && selectedPlugin && (
-                        <div className="fixed inset-0 z-[500] flex justify-end overflow-hidden">
-                            <motion.div
+                {typeof document !== 'undefined' && createPortal(
+                    <AnimatePresence>
+                        {(showAPIKeys || showEmbedCode || showTester) && selectedPlugin && (
+                            <div className="fixed inset-0 z-[1000] flex justify-end overflow-hidden">
+                                <motion.div
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
                                 exit={{ opacity: 0 }}
@@ -274,11 +276,7 @@ function PluginDashboardContent() {
                                 </motion.button>
 
                                 <div className="p-10 pt-16 h-full overflow-y-auto custom-scrollbar">
-                                    <div className="flex justify-between items-center mb-8">
-                                        <h2 className={`text-4xl font-black tracking-tighter ${isDark ? 'text-white' : 'text-zinc-900'}`}>
-                                            {showAPIKeys ? 'Credentials' : showTester ? 'Test Plugin' : 'Embed Code'}
-                                        </h2>
-                                    </div>
+
                                     {showAPIKeys && (
                                         <APIKeyManager plugin={selectedPlugin} onClose={handleClosePanel} />
                                     )}
@@ -291,8 +289,10 @@ function PluginDashboardContent() {
                                 </div>
                             </motion.div>
                         </div>
-                    )}
-                </AnimatePresence>
+                        )}
+                    </AnimatePresence>,
+                    document.body
+                )}
             </div>
 
             {/* Create plugin modal */}

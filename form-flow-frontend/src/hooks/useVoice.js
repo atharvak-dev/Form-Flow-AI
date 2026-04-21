@@ -36,6 +36,12 @@ export default function useVoice() {
     const micStreamRef = useRef(null);
     const animationFrameRef = useRef(null);
 
+    // Use ref to track isListening state to avoid stale closure
+    const isListeningRef = useRef(false);
+    useEffect(() => {
+        isListeningRef.current = isListening;
+    }, [isListening]);
+
     // Initialize Speech Recognition
     useEffect(() => {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -79,12 +85,12 @@ export default function useVoice() {
         };
 
         recognition.onend = () => {
-            // Auto-restart if still supposed to be listening
-            if (isListening && recognitionRef.current) {
+            // Auto-restart if still supposed to be listening (use ref to avoid stale closure)
+            if (isListeningRef.current && recognitionRef.current) {
                 try {
                     recognitionRef.current.start();
                 } catch (e) {
-                    // Already started
+                    // Already started or not allowed
                 }
             }
         };
@@ -94,9 +100,10 @@ export default function useVoice() {
         return () => {
             if (recognitionRef.current) {
                 recognitionRef.current.stop();
+                recognitionRef.current = null;
             }
         };
-    }, [isListening]);
+    }, []); // Empty dependency - recognition initialized once
 
     // Audio analysis for volume visualization
     const startAudioAnalysis = useCallback(async () => {
@@ -206,12 +213,34 @@ export default function useVoice() {
     // Cleanup on unmount
     useEffect(() => {
         return () => {
-            stopAudioAnalysis();
+            // Cancel any pending animation frame
+            if (animationFrameRef.current) {
+                cancelAnimationFrame(animationFrameRef.current);
+                animationFrameRef.current = null;
+            }
+
+            // Stop microphone stream
+            if (micStreamRef.current) {
+                micStreamRef.current.getTracks().forEach(track => track.stop());
+                micStreamRef.current = null;
+            }
+
+            // Close audio context
+            if (audioContextRef.current) {
+                audioContextRef.current.close().catch(() => {});
+                audioContextRef.current = null;
+            }
+
+            // Stop speech recognition
             if (recognitionRef.current) {
                 recognitionRef.current.stop();
+                recognitionRef.current = null;
             }
+
+            // Clear analyser
+            analyserRef.current = null;
         };
-    }, [stopAudioAnalysis]);
+    }, []);
 
     return {
         isListening,

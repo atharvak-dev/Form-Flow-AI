@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Mic, MicOff, ChevronLeft, ChevronRight, SkipForward, Send, Volume2, Keyboard, Terminal, Activity, CheckCircle, Sparkles, X, Brain, Lightbulb } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api, { API_BASE_URL, refineText, sendConversationMessage, getSuggestions, getSmartSuggestions, startConversationSession } from '@/services/api';
@@ -6,6 +6,22 @@ import { instantFillFromProfile, extractFillableFields } from '../utils/instantF
 import AttachmentField from './AttachmentField';
 
 const VoiceFormFiller = ({ formSchema, formContext, formUrl, initialFilledData, onComplete, onClose }) => {
+    // Guard: Ensure formSchema is valid
+    if (!formSchema || !Array.isArray(formSchema) || formSchema.length === 0) {
+        return (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/20 font-sans">
+                <div className="bg-black/40 backdrop-blur-2xl rounded-2xl border border-white/20 p-8 text-center">
+                    <p className="text-white/60 text-lg mb-4">No form schema provided</p>
+                    {onClose && (
+                        <button onClick={onClose} className="px-4 py-2 bg-white/10 text-white rounded-lg hover:bg-white/20">
+                            Close
+                        </button>
+                    )}
+                </div>
+            </div>
+        );
+    }
+
     const [isListening, setIsListening] = useState(false);
     const [currentFieldIndex, setCurrentFieldIndex] = useState(0);
     const [formData, setFormData] = useState({});
@@ -36,6 +52,7 @@ const VoiceFormFiller = ({ formSchema, formContext, formUrl, initialFilledData, 
     const formDataRef = useRef({});
     const audioRef = useRef(null);
     const idleTimeoutRef = useRef(null);
+    const playPromptRef = useRef(null);
     const [userProfile, setUserProfile] = useState(null);
     const [autoFilledFields, setAutoFilledFields] = useState({});
     const [lastFilled, setLastFilled] = useState(null);
@@ -67,8 +84,13 @@ const VoiceFormFiller = ({ formSchema, formContext, formUrl, initialFilledData, 
     useEffect(() => { indexRef.current = currentFieldIndex; }, [currentFieldIndex]);
 
     const allFields = useMemo(() => {
-        return formSchema.flatMap(form =>
-            form.fields.filter(field => {
+        if (!formSchema || !Array.isArray(formSchema)) return [];
+        
+        return formSchema.flatMap(form => {
+            if (!form || !form.fields || !Array.isArray(form.fields)) return [];
+            return form.fields.filter(field => {
+                if (!field || !field.name) return false;
+                
                 const name = (field.name || '').toLowerCase();
                 const label = (field.label || '').toLowerCase();
                 const isHidden = field.hidden || field.type === 'hidden';
@@ -81,11 +103,11 @@ const VoiceFormFiller = ({ formSchema, formContext, formUrl, initialFilledData, 
                 const isTerms = ['terms', 'agree', 'policy'].some(kw => name.includes(kw));
 
                 return !isHidden && !isSubmit && !isConfirm && !isTerms;
-            })
-        );
+            });
+        });
     }, [formSchema]);
 
-    const currentField = allFields[currentFieldIndex];
+    const currentField = allFields[currentFieldIndex] || null;
     // Fix Progress Calculation
     const progress = Math.min(Math.round(((currentFieldIndex) / allFields.length) * 100), 100);
 
@@ -139,6 +161,9 @@ const VoiceFormFiller = ({ formSchema, formContext, formUrl, initialFilledData, 
     }, []);
 
     // WebSocket for real-time Magic Fill updates
+    const [wsError, setWsError] = useState(null);
+    const [wsConnected, setWsConnected] = useState(false);
+
     useEffect(() => {
         if (!userProfile) return;
 
@@ -147,41 +172,71 @@ const VoiceFormFiller = ({ formSchema, formContext, formUrl, initialFilledData, 
         console.log('📡 Connecting to WebSocket for progress...', wsUrl);
 
         let socket;
-        try {
-            socket = new WebSocket(wsUrl);
+        let reconnectTimeout;
 
-            socket.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    if (data.type === 'field_filled' && data.field_id && data.value) {
-                        console.log(`✨ Real-time filled: ${data.field_id} = ${data.value} (via ${data.source})`);
+        const connectWebSocket = () => {
+            try {
+                socket = new WebSocket(wsUrl);
 
-                        // Update state if not already filled
-                        if (!formDataRef.current[data.field_id]) {
-                            const field = allFields.find(f => f.name === data.field_id);
-                            if (field) {
-                                updateField(field, data.value);
-                                setAutoFilledFields(prev => ({ ...prev, [data.field_id]: data.value }));
-                            } else {
-                                // Fallback if not in allFields (e.g. hidden or extra)
-                                setFormData(prev => ({ ...prev, [data.field_id]: data.value }));
-                                formDataRef.current = { ...formDataRef.current, [data.field_id]: data.value };
+                socket.onopen = () => {
+                    console.log('📡 WebSocket connected');
+                    setWsConnected(true);
+                    setWsError(null);
+                };
+
+                socket.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data.type === 'field_filled' && data.field_id && data.value) {
+                            console.log(`✨ Real-time filled: ${data.field_id} = ${data.value} (via ${data.source})`);
+
+                            // Update state if not already filled
+                            if (!formDataRef.current[data.field_id]) {
+                                const field = allFields.find(f => f.name === data.field_id);
+                                if (field) {
+                                    updateField(field, data.value);
+                                    setAutoFilledFields(prev => ({ ...prev, [data.field_id]: data.value }));
+                                } else {
+                                    // Fallback if not in allFields (e.g. hidden or extra)
+                                    setFormData(prev => ({ ...prev, [data.field_id]: data.value }));
+                                    formDataRef.current = { ...formDataRef.current, [data.field_id]: data.value };
+                                }
                             }
                         }
+                    } catch (e) {
+                        console.error('WS parse error:', e);
                     }
-                } catch (e) {
-                    console.error('WS parse error:', e);
-                }
-            };
+                };
 
-            socket.onclose = () => console.log('📡 WebSocket closed');
-            socket.onerror = (err) => console.warn('📡 WebSocket error:', err);
-        } catch (e) {
-            console.error('WS connection failed:', e);
-        }
+                socket.onclose = (event) => {
+                    console.log('📡 WebSocket closed:', event.code, event.reason);
+                    setWsConnected(false);
+                    
+                    // Auto-reconnect if not a clean close
+                    if (event.code !== 1000 && event.code !== 1001) {
+                        reconnectTimeout = setTimeout(connectWebSocket, 3000);
+                    }
+                };
+
+                socket.onerror = (err) => {
+                    console.warn('📡 WebSocket error:', err);
+                    setWsError('Real-time updates unavailable. Form will still work normally.');
+                };
+            } catch (e) {
+                console.error('WS connection failed:', e);
+                setWsError('Real-time updates unavailable. Form will still work normally.');
+            }
+        };
+
+        connectWebSocket();
 
         return () => {
-            if (socket) socket.close();
+            if (socket) {
+                socket.close(1000, 'Component unmounting');
+            }
+            if (reconnectTimeout) {
+                clearTimeout(reconnectTimeout);
+            }
         };
     }, [userProfile, allFields]);
 
@@ -341,20 +396,23 @@ const VoiceFormFiller = ({ formSchema, formContext, formUrl, initialFilledData, 
 
     // Prompt Playback & Input Pre-fill
     useEffect(() => {
-        if (allFields.length && currentFieldIndex < allFields.length) {
-            const field = allFields[currentFieldIndex];
-            const preFilledValue = formDataRef.current[field.name] || autoFilledFields[field.name];
+        if (!allFields?.length || currentFieldIndex >= allFields.length) return;
+        
+        const field = allFields[currentFieldIndex];
+        if (!field) return;
+        
+        const preFilledValue = formDataRef.current[field.name] || autoFilledFields[field.name];
 
-            setTranscript(typeof preFilledValue === 'object' && preFilledValue !== null ? (preFilledValue?.name || '') : (preFilledValue || ''));
-            setTextInputValue(typeof preFilledValue === 'object' && preFilledValue !== null ? (preFilledValue?.name || '') : (preFilledValue || ''));
-            setShowTextInput(false);
+        setTranscript(typeof preFilledValue === 'object' && preFilledValue !== null ? (preFilledValue?.name || '') : (preFilledValue || ''));
+        setTextInputValue(typeof preFilledValue === 'object' && preFilledValue !== null ? (preFilledValue?.name || '') : (preFilledValue || ''));
+        setShowTextInput(false);
 
-            // FIX: Only play backend audio prompt when NO conversation session exists
-            // When session exists, agent's response already speaks the question via SpeechSynthesis
-            // This prevents dual TTS conflict (audio from /speech/ + SpeechSynthesis)
-            if (!sessionId) {
-                playPrompt(field.name);
-            }
+        // FIX: Only play backend audio prompt when NO conversation session exists
+        // When session exists, agent's response already speaks the question via SpeechSynthesis
+        // This prevents dual TTS conflict (audio from /speech/ + SpeechSynthesis)
+        if (!sessionId && audioRef) {
+            // Use ref to call playPrompt without adding it to deps
+            playPromptRef.current?.(field.name);
         }
 
         // Cleanup: Stop audio when switching fields or if session starts
@@ -381,12 +439,15 @@ const VoiceFormFiller = ({ formSchema, formContext, formUrl, initialFilledData, 
             audio.onended = () => {
                 // Check ref to ensure we haven't been stopped
                 if (audioRef.current === audio) {
-                    idleTimeoutRef.current = setTimeout(() => playPrompt(fieldName), 20000);
+                    idleTimeoutRef.current = setTimeout(() => playPromptRef.current?.(fieldName), 20000);
                 }
             };
             await audio.play().catch(() => { });
         } catch (e) { }
     };
+    
+    // Store playPrompt in ref to avoid stale closure and dependency issues
+    playPromptRef.current = playPrompt;
 
     const handleBrowserSpeechResult = (event) => {
         let final = '', interim = '';
@@ -639,7 +700,8 @@ const VoiceFormFiller = ({ formSchema, formContext, formUrl, initialFilledData, 
     };
 
     // Fetch suggestions with debouncing
-    const fetchSuggestions = async (field, partialValue = null) => {
+    const fetchSuggestions = useCallback(async (field, partialValue = null) => {
+        if (!field) return;
         try {
             setLoadingSuggestions(true);
             const result = await getSuggestions(
@@ -656,10 +718,11 @@ const VoiceFormFiller = ({ formSchema, formContext, formUrl, initialFilledData, 
         } finally {
             setLoadingSuggestions(false);
         }
-    };
+    }, []);
 
     // 🧠 Smart Suggestions - Profile-based intelligent suggestions
-    const fetchSmartSuggestions = async (field) => {
+    const fetchSmartSuggestions = useCallback(async (field) => {
+        if (!field) return;
         try {
             console.log('🧠 Fetching smart suggestions for:', field.name);
             const all_field_labels = allFields.map(f => f.label || f.name);
@@ -694,11 +757,12 @@ const VoiceFormFiller = ({ formSchema, formContext, formUrl, initialFilledData, 
                 // Silent fail - user can still type manually
             }
         }
-    };
+    }, [fetchSuggestions, allFields, formContext]);
 
     // 🕐 Hesitation Detection Timer
     // Progressive: 5 seconds initially, 3 seconds after 5 questions
-    const startHesitationTimer = (field) => {
+    const startHesitationTimer = useCallback((field) => {
+        if (!field) return;
         clearTimeout(hesitationTimerRef.current);
 
         // Close any existing suggestion popup
@@ -715,13 +779,13 @@ const VoiceFormFiller = ({ formSchema, formContext, formUrl, initialFilledData, 
                 fetchSmartSuggestions(field);
             }
         }, delay);
-    };
+    }, [processing, showTextInput, fetchSmartSuggestions]);
 
     // Clear hesitation timer on any user activity
-    const clearHesitationTimer = () => {
+    const clearHesitationTimer = useCallback(() => {
         clearTimeout(hesitationTimerRef.current);
         setShowSmartSuggestions(false);
-    };
+    }, []);
 
     // Handle smart suggestion selection
     const handleSmartSuggestionSelect = (suggestion) => {
@@ -743,7 +807,7 @@ const VoiceFormFiller = ({ formSchema, formContext, formUrl, initialFilledData, 
         }
 
         return () => clearTimeout(hesitationTimerRef.current);
-    }, [currentFieldIndex, processing, magicFillLoading]);
+    }, [currentFieldIndex, processing, magicFillLoading, currentField]);
 
     // Clear hesitation timer when user starts typing or speaking
     useEffect(() => {
@@ -769,14 +833,14 @@ const VoiceFormFiller = ({ formSchema, formContext, formUrl, initialFilledData, 
         }
 
         return () => clearTimeout(fetchTimeoutRef.current);
-    }, [textInputValue, showTextInput, currentField]);
+    }, [textInputValue, showTextInput, currentField, fetchSuggestions]);
 
     // Fetch initial suggestions when landing on a new field in voice mode
     useEffect(() => {
         if (!showTextInput && currentField) {
             fetchSuggestions(currentField, null);
         }
-    }, [currentFieldIndex, showTextInput]);
+    }, [currentFieldIndex, showTextInput, currentField, fetchSuggestions]);
 
 
     // Audio Analysis
@@ -815,8 +879,32 @@ const VoiceFormFiller = ({ formSchema, formContext, formUrl, initialFilledData, 
         setVolumeLevel(0);
     };
 
-    // Moved to top
-    if (currentFieldIndex >= allFields.length) return null;
+    // Guard: Don't render if no fields or invalid state
+    if (!allFields || allFields.length === 0 || !currentField) {
+        return (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/20 font-sans">
+                <div className="bg-black/40 backdrop-blur-2xl rounded-2xl border border-white/20 p-8 text-center">
+                    <p className="text-white/60 text-lg">No fields to fill</p>
+                    {onClose && (
+                        <button onClick={onClose} className="mt-4 px-4 py-2 bg-white/10 text-white rounded-lg hover:bg-white/20">
+                            Close
+                        </button>
+                    )}
+                </div>
+            </div>
+        );
+    }
+    
+    if (currentFieldIndex >= allFields.length) {
+        return (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/20 font-sans">
+                <div className="bg-black/40 backdrop-blur-2xl rounded-2xl border border-white/20 p-8 text-center">
+                    <p className="text-white/60 text-lg">Form completed!</p>
+                    <button onClick={() => onComplete?.(formDataRef.current)} className="mt-4 px-4 py-2 bg-emerald-500 text-black rounded-lg">Finish</button>
+                </div>
+            </div>
+        );
+    }
 
     return (
         // OVERLAY: Completely clear (bg-black/20 for slight dim, NO BLUR)
@@ -856,6 +944,18 @@ const VoiceFormFiller = ({ formSchema, formContext, formUrl, initialFilledData, 
                     </div>
 
                     <div className="flex items-center gap-4">
+                        {/* WebSocket Connection Status */}
+                        {wsConnected ? (
+                            <div className="flex items-center gap-1.5 text-emerald-400" title="Real-time sync active">
+                                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                                <span className="text-xs text-emerald-400/70">LIVE</span>
+                            </div>
+                        ) : wsError ? (
+                            <div className="flex items-center gap-1.5 text-amber-400" title={wsError}>
+                                <span className="w-2 h-2 rounded-full bg-amber-400" />
+                                <span className="text-xs text-amber-400/70">OFFLINE</span>
+                            </div>
+                        ) : null}
                         {onClose && (
                             <button onClick={onClose} className="p-1 hover:bg-white/10 rounded text-white/40 hover:text-white transition-colors">
                                 <X size={16} />

@@ -15,29 +15,22 @@ import {
 } from 'recharts';
 import { useTheme } from '@/context/ThemeProvider';
 
-// Premium color palette with gradients
-const COLORS = {
-    primary: ['#6366F1', '#8B5CF6'], // Indigo to Purple
-    success: ['#10B981', '#34D399'], // Emerald
-    warning: ['#F59E0B', '#FBBF24'], // Amber
-    info: ['#3B82F6', '#60A5FA'],    // Blue
-    danger: ['#EF4444', '#F87171'],  // Red
-    pink: ['#EC4899', '#F472B6'],    // Pink
-};
-
+// Unified emerald palette for all charts
 const CHART_COLORS = ['#10B981', '#14B8A6', '#22C55E', '#84CC16', '#34D399', '#6EE7B7'];
 
-// Custom tooltip style
+// Terminal-inspired tooltip style (matches form-filler aesthetic)
 const getTooltipStyle = (isDark) => ({
-    backgroundColor: isDark ? 'rgba(9, 9, 11, 0.95)' : 'rgba(255, 255, 255, 0.95)',
-    border: isDark ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)',
+    backgroundColor: isDark ? 'rgba(0, 0, 0, 0.9)' : 'rgba(255, 255, 255, 0.95)',
+    border: isDark ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.08)',
     borderRadius: '12px',
     color: isDark ? '#fff' : '#18181b',
     boxShadow: isDark
-        ? '0 4px 20px rgba(0, 0, 0, 0.5)'
-        : '0 4px 20px rgba(0, 0, 0, 0.1)',
-    padding: '12px 16px',
-    backdropFilter: 'blur(8px)',
+        ? '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 20px rgba(16, 185, 129, 0.08)'
+        : '0 4px 20px rgba(0, 0, 0, 0.08)',
+    padding: '10px 14px',
+    backdropFilter: 'blur(12px)',
+    fontSize: '12px',
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
 });
 
 export function SubmissionTrendChart({ data = [] }) {

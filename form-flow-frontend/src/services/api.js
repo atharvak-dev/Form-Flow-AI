@@ -16,22 +16,48 @@ const getBaseUrl = () => {
 };
 export const API_BASE_URL = getBaseUrl();
 
-// Create axios instance with default config (no global timeout)
+// Create axios instance with default config
 const api = axios.create({
     baseURL: API_BASE_URL,
     headers: {
         'Content-Type': 'application/json',
     },
-    // No global timeout - form operations can take minutes
+    // Default timeout: 30 seconds for most requests
+    timeout: 30000,
+    // Enable withCredentials for CSRF protection (if backend sets cookie)
+    withCredentials: true
 });
 
-// Request interceptor to add auth token
+// CSRF Token Management
+const getCsrfToken = () => {
+    // Try to get CSRF token from cookie first (more secure)
+    const csrfCookie = document.cookie
+        .split('; ')
+        .find(row => row.startsWith('csrftoken='));
+    
+    if (csrfCookie) {
+        return csrfCookie.split('=')[1];
+    }
+    
+    // Fallback to localStorage (less secure but backward compatible)
+    return localStorage.getItem('csrf_token');
+};
+
+// Request interceptor to add auth token and CSRF
 api.interceptors.request.use(
     (config) => {
+        // Add auth token
         const token = localStorage.getItem('token');
         if (token) {
             config.headers.Authorization = `Bearer ${token}`;
         }
+        
+        // Add CSRF token for state-changing requests
+        const csrfToken = getCsrfToken();
+        if (csrfToken && ['post', 'put', 'patch', 'delete'].includes(config.method)) {
+            config.headers['X-CSRF-Token'] = csrfToken;
+        }
+        
         return config;
     },
     (error) => Promise.reject(error)
@@ -47,10 +73,14 @@ api.interceptors.response.use(
             localStorage.removeItem('token');
             localStorage.removeItem('user_email');
 
-            // Clear React Query cache to prevent stale data
-            if (typeof window !== 'undefined' && window.queryClient) {
+            // Clear React Query cache to prevent stale data (with null check)
+            if (typeof window !== 'undefined') {
                 try {
-                    window.queryClient.clear();
+                    // Check if queryClient exists before using it
+                    const queryClient = window.queryClient;
+                    if (queryClient && typeof queryClient.clear === 'function') {
+                        queryClient.clear();
+                    }
                 } catch (e) {
                     console.warn('Failed to clear query cache:', e);
                 }
@@ -69,10 +99,11 @@ api.interceptors.response.use(
 );
 
 /**
- * Scrape and parse a form URL (no timeout - can take time)
+ * Scrape and parse a form URL
+ * Note: Longer timeout for scraping operations (2 minutes)
  */
 export const scrapeForm = async (url) => {
-    const response = await api.post('/scrape', { url });
+    const response = await api.post('/scrape', { url }, { timeout: 120000 });
     return response.data;
 };
 
@@ -208,7 +239,7 @@ export const fillPdf = async (pdfId, data, flatten = false) => {
         pdf_id: pdfId,
         data,
         flatten,
-    });
+    }, { timeout: 60000 });
     return response.data;
 };
 
@@ -242,14 +273,15 @@ export const uploadWordDocument = async (file) => {
 };
 
 /**
- * Submit form data to the original website (no timeout - can take minutes)
+ * Submit form data to the original website
+ * Note: Longer timeout for form submission (3 minutes)
  */
 export const submitForm = async (url, formData, formSchema) => {
     const response = await api.post('/submit-form', {
         url,
         form_data: formData,
         form_schema: formSchema,
-    });
+    }, { timeout: 180000 });
     return response.data;
 };
 
@@ -257,13 +289,24 @@ export const submitForm = async (url, formData, formSchema) => {
 
 /**
  * User login
+ * Note: Uses axios directly to avoid auth interceptor loop
+ * But now includes CSRF token handling for security
  */
 export const login = async (email, password) => {
     const form = new FormData();
     form.append('username', email);
     form.append('password', password);
 
-    const response = await axios.post(`${API_BASE_URL}/login`, form);
+    const response = await axios.post(`${API_BASE_URL}/login`, form, {
+        withCredentials: true // Enable cookies for CSRF
+    });
+    
+    // Store CSRF token from response headers if available
+    const csrfToken = response.headers['x-csrf-token'] || response.headers['x-csrftoken'];
+    if (csrfToken) {
+        localStorage.setItem('csrf_token', csrfToken);
+    }
+    
     return response.data;
 };
 
