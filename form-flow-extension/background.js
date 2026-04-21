@@ -110,41 +110,8 @@ function startKeepAlive() {
 connectWebSocket();
 startKeepAlive();
 
-// Restore sessions from storage on startup
-restoreSessions().then(() => {
-    console.log('Sessions restored. Active tabs:', [...activeSessions.keys()]);
-});
-
-async function restoreSessions() {
-    try {
-        const result = await chrome.storage.session.get('activeSessions');
-        if (result.activeSessions) {
-            activeSessions = new Map(Object.entries(JSON.parse(result.activeSessions)));
-            // Convert string keys back to numbers if needed (tabIds are numbers)
-            const map = new Map();
-            for (const [key, value] of activeSessions) {
-                map.set(Number(key), value);
-            }
-            activeSessions = map;
-        }
-    } catch (e) {
-        console.warn('Failed to restore sessions:', e);
-    }
-}
-
-async function persistSessions() {
-    try {
-        const obj = Object.fromEntries(activeSessions);
-        await chrome.storage.session.set({ 'activeSessions': JSON.stringify(obj) });
-    } catch (e) {
-        console.error('Failed to persist sessions:', e);
-    }
-}
-
-// =============================================================================
-// Message Handling (HTTP-based for now, future migration to WS)
-// =============================================================================
-
+// Register message handler FIRST (before restoring sessions)
+// This ensures no messages are missed during restoration
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Return true immediately to indicate we will respond asynchronously
     handleMessage(message, sender)
@@ -163,6 +130,53 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
     return true;
 });
+
+// THEN restore sessions from storage
+restoreSessions().then(() => {
+    console.log('Sessions restored. Active tabs:', [...activeSessions.keys()]);
+}).catch(e => {
+    console.warn('Session restoration failed (non-critical):', e);
+});
+
+async function restoreSessions() {
+    try {
+        // Guard: chrome.storage.session may not be available in all Chrome versions
+        if (!chrome.storage || !chrome.storage.session) {
+            console.warn('chrome.storage.session not available, skipping restore');
+            return;
+        }
+        const result = await chrome.storage.session.get('activeSessions');
+        if (result.activeSessions) {
+            activeSessions = new Map(Object.entries(JSON.parse(result.activeSessions)));
+            // Convert string keys back to numbers if needed (tabIds are numbers)
+            const map = new Map();
+            for (const [key, value] of activeSessions) {
+                map.set(Number(key), value);
+            }
+            activeSessions = map;
+        }
+    } catch (e) {
+        console.warn('Failed to restore sessions:', e);
+    }
+}
+
+async function persistSessions() {
+    try {
+        // Guard: chrome.storage.session may not be available
+        if (!chrome.storage || !chrome.storage.session) {
+            return;
+        }
+        const obj = Object.fromEntries(activeSessions);
+        await chrome.storage.session.set({ 'activeSessions': JSON.stringify(obj) });
+    } catch (e) {
+        console.error('Failed to persist sessions:', e);
+    }
+}
+
+
+// =============================================================================
+// Message Handling (HTTP-based for now, future migration to WS)
+// =============================================================================
 
 async function handleMessage(message, sender) {
     // Ensure sessions are loaded before processing

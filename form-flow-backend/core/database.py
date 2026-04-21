@@ -61,10 +61,11 @@ DATABASE_URL = _process_database_url(settings.DATABASE_URL)
 engine = create_async_engine(
     DATABASE_URL,
     echo=settings.DEBUG,  # Log SQL queries in debug mode
-    pool_pre_ping=True,   # Verify connections before use
-    pool_recycle=300,     # Recycle connections after 5 minutes
-    pool_size=3,          # Reduced for small servers (was 5)
-    max_overflow=5,       # Reduced for small servers (was 10)
+    pool_pre_ping=False,  # Neon's pooler handles connection validation
+    pool_recycle=600,     # Recycle connections after 10 minutes
+    pool_size=5,          # Slightly larger pool for concurrent requests
+    max_overflow=10,      # Allow burst connections
+    pool_timeout=10,      # Fast timeout to avoid blocking
 )
 
 SessionLocal = sessionmaker(

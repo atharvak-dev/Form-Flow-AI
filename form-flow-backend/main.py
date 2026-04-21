@@ -274,6 +274,9 @@ async def root():
     }
 
 
+# Health check cache (5-second TTL)
+_health_cache = {"data": None, "expires_at": 0}
+
 @app.get("/health", tags=["Health"])
 async def health_check():
     """
@@ -289,6 +292,13 @@ async def health_check():
     Returns:
         dict: Health status with component details
     """
+    import time as _time
+    now = _time.time()
+    
+    # Return cached result if still valid (5s TTL)
+    if _health_cache["data"] and now < _health_cache["expires_at"]:
+        return _health_cache["data"]
+    
     from utils.cache import check_redis_health
     from core.dependencies import get_initialized_services
     from utils.tasks import get_queue_stats
@@ -296,7 +306,7 @@ async def health_check():
     db_healthy = await database.check_database_health()
     redis_healthy = await check_redis_health()
     
-    return {
+    result = {
         "status": "healthy" if db_healthy else "degraded",
         "components": {
             "database": db_healthy,
@@ -308,6 +318,12 @@ async def health_check():
         "task_queue": get_queue_stats(),
         "version": settings.APP_VERSION
     }
+    
+    # Cache for 5 seconds
+    _health_cache["data"] = result
+    _health_cache["expires_at"] = now + 5
+    
+    return result
 
 
 @app.get("/health/ai", tags=["Health"])
@@ -388,7 +404,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8001,
+        port=8000,
         reload=settings.DEBUG,
         log_level="debug" if settings.DEBUG else "info"
     )

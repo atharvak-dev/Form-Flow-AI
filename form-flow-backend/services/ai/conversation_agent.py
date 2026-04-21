@@ -378,8 +378,8 @@ class ConversationAgent:
         remaining_fields = session.get_remaining_fields()
         
         # DEBUG: Log session state
-        logger.info(f"🔍 Session Debug - Extracted: {list(session.extracted_fields.keys())}")
-        logger.info(f"🔍 Session Debug - Remaining ({len(remaining_fields)}): {[f.get('name') for f in remaining_fields]}")
+        logger.debug(f"Session Debug - Extracted: {list(session.extracted_fields.keys())}")
+        logger.debug(f"Session Debug - Remaining ({len(remaining_fields)}): {[f.get('name') for f in remaining_fields]}")
         
         # Determine max fields based on client type and feature flag
         # Web frontend gets grouped questions when SMART_GROUPING_ENABLED is True
@@ -419,7 +419,7 @@ class ConversationAgent:
             logger.debug(f"Low intent confidence ({intent_confidence:.2f}), treating as DATA")
             intent = UserIntent.DATA
         
-        logger.info(f"Detected intent: {intent} (confidence: {intent_confidence:.2f})")
+        logger.debug(f"Detected intent: {intent} (confidence: {intent_confidence:.2f})")
         
         # Update conversation context
         session.conversation_context.update_from_input(user_input)
@@ -589,8 +589,8 @@ class ConversationAgent:
         })
         
         # 7. Extract values
-        logger.info(f"Processing input: '{user_input[:100]}...'")
-        logger.info(f"Current batch fields: {[f.get('name') for f in current_batch]}")
+        logger.debug(f"Processing input: '{user_input[:100]}...'")
+        logger.debug(f"Current batch fields: {[f.get('name') for f in current_batch]}")
         
         # Get full schema for extraction and refinement
         all_fields = remaining_fields

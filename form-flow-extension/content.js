@@ -1320,7 +1320,8 @@
                     // Show the corrected value (not raw transcript) in chat and send to backend
                     this.addMessage(textToSend, 'user');
                     this.processUserSpeech(textToSend);
-                    this.stopListening();
+                    // Don't auto-stop - let user continue speaking (continuous mode)
+                    // User clicks mic button again to stop
                 }
             };
 
@@ -1474,13 +1475,37 @@
             }
 
             try {
+                // Check if we have an active session
                 const statusResponse = await chrome.runtime.sendMessage({ type: 'GET_SESSION_STATUS' });
+                
+                // If no session exists, create one first and wait for it
                 if (!statusResponse.hasSession && this.currentFormSchema) {
-                    await chrome.runtime.sendMessage({
+                    console.log('FormFlow: No active session, creating one...');
+                    const sessionResponse = await chrome.runtime.sendMessage({
                         type: 'START_SESSION',
                         formSchema: this.currentFormSchema,
                         formUrl: window.location.href
                     });
+                    
+                    // Verify session was created successfully before continuing
+                    if (!sessionResponse || !sessionResponse.success) {
+                        loadingBubble.remove();
+                        const errMsg = sessionResponse?.error || 'Failed to create session. Is the backend running?';
+                        this.addMessage(`Session error: ${errMsg}`, 'ai');
+                        return;
+                    }
+                    
+                    console.log('FormFlow: Session created:', sessionResponse.sessionId);
+                    
+                    // Show the initial greeting if available
+                    if (sessionResponse.greeting) {
+                        // Replace the default greeting with the actual one from backend
+                        const firstBubble = this.chatHistory.querySelector('.chat-bubble.ai');
+                        if (firstBubble) {
+                            const msgContent = firstBubble.querySelector('.msg-content');
+                            if (msgContent) msgContent.textContent = sessionResponse.greeting;
+                        }
+                    }
                 }
 
                 const response = await chrome.runtime.sendMessage({
@@ -1491,7 +1516,7 @@
                 // Remove loading bubble
                 loadingBubble.remove();
 
-                if (response.success) {
+                if (response && response.success) {
                     this.addMessage(response.response, 'ai');
 
                     // Accumulate extracted values across the session
@@ -1515,12 +1540,13 @@
                         this.showNotification('🎉 All fields collected! Ready to fill form.');
                     }
 
-
+                } else if (response) {
+                    this.addMessage("Error: " + (response.error || 'Unknown error'), 'ai');
                 } else {
-                    this.addMessage("Error: " + response.error, 'ai');
+                    this.addMessage("No response from backend. Please try again.", 'ai');
                 }
             } catch (e) {
-                console.error(e);
+                console.error('FormFlow: processUserSpeech error:', e);
                 loadingBubble.remove();
                 this.addMessage("Connection error (Backend might be down)", 'ai');
             }
@@ -1813,6 +1839,36 @@
             overlay.create();
         });
     }
+
+    // =============================================================================
+    // Message Listener for Background Script Communication
+    // =============================================================================
+
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        try {
+            switch (message.type) {
+                case 'WS_STATUS':
+                    console.log('FormFlow: WebSocket status:', message.connected ? 'connected' : 'disconnected');
+                    break;
+
+                case 'FILL_FORM':
+                    if (message.data && overlay) {
+                        console.log('FormFlow: Received FILL_FORM from background', message.data);
+                        overlay.autoFill(message.data)
+                            .then(() => sendResponse({ success: true }))
+                            .catch(err => sendResponse({ success: false, error: err.message }));
+                        return true; // async response
+                    }
+                    break;
+
+                default:
+                    break;
+            }
+        } catch (e) {
+            console.error('FormFlow: Message handling error:', e);
+        }
+        return false;
+    });
 
     console.log('FormFlow: Initialized successfully');
 

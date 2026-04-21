@@ -1,7 +1,7 @@
 
 /**
  * FormFlow AI - Emerald Slate Controller
- * v2.1.0 React Port
+ * v2.2.0 - With Retry Support
  */
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -17,6 +17,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
 
     let isConnected = false;
+    let retryCount = 0;
+    const MAX_RETRIES = 3;
 
     // =========================================================================
     // REACT STATE SIMULATION
@@ -96,10 +98,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     async function checkConnection() {
         try {
+            State.addLog('Pinging backend...', 'NET');
             const response = await chrome.runtime.sendMessage({ type: 'CHECK_BACKEND' });
 
             if (response && (response.healthy || response.success)) {
                 isConnected = true;
+                retryCount = 0;
                 State.addLog('Uplink established :: Latency <10ms', 'NET');
                 State.addLog(`Backend version ${response.version || '1.0.0'} active`, 'SYS');
                 State.setStatus('Online', true);
@@ -107,18 +111,30 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 ui.runBtn.disabled = false;
                 ui.actionText.textContent = "SYSTEM READY";
+                
+                // Update button text for normal operation
+                ui.runBtn.querySelector('.btn-text').textContent = 'Start Voice Agent';
 
             } else {
                 throw new Error('Connection refused');
             }
         } catch (err) {
             isConnected = false;
+            retryCount++;
             State.addLog(`Connection Failed: ${err.message}`, 'ERR');
             State.setStatus('Offline', false);
-            ui.actionText.textContent = "SYSTEM ERROR";
-
-            // Allow retry via run button (change icon behavior?)
-            // For now just log
+            
+            if (retryCount < MAX_RETRIES) {
+                ui.actionText.textContent = `RETRY (${retryCount}/${MAX_RETRIES})`;
+                State.addLog(`Retrying in 3 seconds... (Attempt ${retryCount}/${MAX_RETRIES})`, 'NET');
+                setTimeout(() => checkConnection(), 3000);
+            } else {
+                ui.actionText.textContent = "CONNECTION FAILED";
+                State.addLog('Max retries reached. Click button to retry.', 'ERR');
+                // Enable button as a manual retry trigger
+                ui.runBtn.disabled = false;
+                ui.runBtn.querySelector('.btn-text').textContent = 'Retry Connection';
+            }
         }
     }
 
@@ -127,7 +143,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     // =========================================================================
 
     ui.runBtn.addEventListener('click', async () => {
-        if (!isConnected) return;
+        // If not connected, use button as retry
+        if (!isConnected) {
+            ui.runBtn.disabled = true;
+            retryCount = 0;
+            State.addLog('Manual retry initiated...', 'SYS');
+            State.setProgress(50);
+            ui.actionText.textContent = "RECONNECTING...";
+            await checkConnection();
+            return;
+        }
 
         State.addLog('Executing voice command injection...', 'SYS');
         State.setProgress(0);
@@ -136,7 +161,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-            if (tab.url.includes('docs.google.com/forms')) {
+            if (!tab) {
+                State.addLog('No active tab found', 'ERR');
+                return;
+            }
+
+            if (tab.url && tab.url.includes('docs.google.com/forms')) {
                 State.addLog('Google Forms Protocol Active', 'SYS');
                 State.addLog('Automation running in background...', 'SYS');
                 State.setProgress(100);
@@ -144,11 +174,29 @@ document.addEventListener('DOMContentLoaded', async () => {
                 return;
             }
 
+            // Check if we can inject into this tab
+            if (tab.url && (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://'))) {
+                State.addLog('Cannot inject into browser pages', 'ERR');
+                ui.actionText.textContent = "INVALID PAGE";
+                return;
+            }
+
             await chrome.scripting.executeScript({
                 target: { tabId: tab.id },
                 func: () => {
+                    // Try to click existing FormFlow trigger button
+                    const root = document.getElementById('formflow-overlay-root');
+                    if (root && root.shadowRoot) {
+                        const triggerBtn = root.shadowRoot.getElementById('triggerBtn');
+                        if (triggerBtn) {
+                            triggerBtn.click();
+                            return true;
+                        }
+                    }
+                    // Fallback: try the old class-based selector
                     const btn = document.querySelector('.formflow-voice-btn');
                     if (btn) btn.click();
+                    return true;
                 }
             });
 
@@ -158,6 +206,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         } catch (err) {
             State.addLog(`Injection Error: ${err.message}`, 'ERR');
+            ui.actionText.textContent = "INJECTION FAILED";
         }
     });
 
