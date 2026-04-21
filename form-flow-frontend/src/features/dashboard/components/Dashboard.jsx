@@ -308,9 +308,18 @@ export function Dashboard() {
                             System Online
                         </motion.div>
 
-                        <h1 className={`text-4xl md:text-5xl font-semibold tracking-tight leading-[1.1] ${isDark ? 'text-white' : 'text-zinc-900'}`}>
-                            {user?.first_name || 'Commander'}'s{' '}
-                            <span className={isDark ? 'text-zinc-500' : 'text-zinc-400'}>Command Center</span>
+                        <h1 className="text-4xl md:text-5xl lg:text-[56px] font-bold tracking-tighter leading-[1.1]">
+                            <span className={isDark ? 'text-zinc-100' : 'text-zinc-900'}>
+                                {user?.first_name || 'Commander'}'s
+                            </span>
+                            <br className="sm:hidden" />
+                            <span className={`block sm:inline sm:ml-3 bg-gradient-to-br bg-clip-text text-transparent ${
+                                isDark 
+                                    ? 'from-emerald-400 via-emerald-500 to-teal-600' 
+                                    : 'from-emerald-500 via-emerald-600 to-teal-700'
+                            }`}>
+                                Command Center
+                            </span>
                         </h1>
                     </div>
 
