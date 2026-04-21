@@ -75,3 +75,6 @@ form-flow-backend/storage/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Kiro (Spec workflow)
+.kiro/

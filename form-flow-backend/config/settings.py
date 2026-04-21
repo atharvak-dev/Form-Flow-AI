@@ -159,6 +159,10 @@ class Settings(BaseSettings):
         default=3,
         description="Number of retry attempts for failed webhook deliveries"
     )
+    WEBHOOK_MAX_PAYLOAD_SIZE: int = Field(
+        default=102400,
+        description="Maximum webhook payload size in bytes (100KB default)"
+    )
     
     # ==========================================================================
     # Application Settings

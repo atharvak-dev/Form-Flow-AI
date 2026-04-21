@@ -227,11 +227,12 @@ class WebhookBase(BaseModel):
         default_factory=lambda: ["form.submitted"],
         description="Event types to subscribe to"
     )
+    name: Optional[str] = Field(None, max_length=100, description="Optional webhook name")
 
 
 class WebhookCreate(WebhookBase):
     """Schema for creating a webhook."""
-    pass
+    secret: Optional[str] = Field(None, description="Custom secret (auto-generated if not provided)")
 
 
 class WebhookUpdate(BaseModel):
@@ -239,6 +240,7 @@ class WebhookUpdate(BaseModel):
     url: Optional[str] = Field(None, max_length=500)
     events: Optional[List[str]] = None
     is_active: Optional[bool] = None
+    name: Optional[str] = Field(None, max_length=100)
 
 
 class WebhookResponse(WebhookBase):

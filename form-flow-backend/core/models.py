@@ -310,8 +310,9 @@ class Webhook(Base):
     )
     url = Column(String(500), nullable=False)
     events = Column(JSONB, default=[], nullable=False)
+    name = Column(String(100))
     secret = Column(String(64), nullable=False)
-    is_active = Column(Boolean, default=True, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
@@ -359,6 +360,7 @@ class WebhookDeliveryLog(Base):
     response_code = Column(Integer)
     response_body = Column(Text)
     attempts = Column(Integer, default=0, nullable=False)
+    next_retry_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     delivered_at = Column(DateTime(timezone=True))
     

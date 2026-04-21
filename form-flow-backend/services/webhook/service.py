@@ -28,11 +28,12 @@ from core.models import Webhook, WebhookDeliveryLog
 from core.schemas import WebhookCreate, WebhookUpdate
 from config.settings import settings
 from utils.logging import get_logger
+from .schemas import FormEventType
 
 logger = get_logger(__name__)
 
-# Valid event types
-VALID_EVENTS = ["form.submitted", "form.failed", "form.scraped"]
+# Valid event types (using enum values)
+VALID_EVENTS = [e.value for e in FormEventType]
 
 
 class WebhookService:
@@ -80,14 +81,15 @@ class WebhookService:
             if count >= settings.WEBHOOK_MAX_PER_USER:
                 raise ValueError(f"Maximum {settings.WEBHOOK_MAX_PER_USER} webhooks per user")
         
-        # Generate secret
-        secret = secrets.token_hex(32)
+        # Generate or use custom secret
+        secret = webhook_data.secret if webhook_data.secret else secrets.token_hex(32)
         
         # Create webhook
         webhook = Webhook(
             user_id=user_id,
             url=url,
             events=events,
+            name=webhook_data.name,
             secret=secret,
             is_active=True
         )
@@ -190,6 +192,9 @@ class WebhookService:
         if updates.is_active is not None:
             webhook.is_active = updates.is_active
         
+        if updates.name is not None:
+            webhook.name = updates.name
+        
         await self.db.commit()
         await self.db.refresh(webhook)
         
@@ -241,7 +246,13 @@ class WebhookService:
         asyncio.create_task(self._process_deliveries())
     
     async def _process_deliveries(self) -> None:
-        """Process pending webhook deliveries."""
+        """
+        Process pending webhook deliveries.
+        
+        Requirements:
+        - Process up to 50 pending deliveries per execution
+        - Also process retrying deliveries that are due
+        """
         # Get pending deliveries
         result = await self.db.execute(
             select(WebhookDeliveryLog)
@@ -251,8 +262,50 @@ class WebhookService:
         )
         deliveries = list(result.scalars().all())
         
-        for delivery in deliveries:
+        # Also get retrying deliveries that are due
+        now = datetime.utcnow()
+        retry_result = await self.db.execute(
+            select(WebhookDeliveryLog)
+            .where(WebhookDeliveryLog.status == "retrying")
+            .where(WebhookDeliveryLog.next_retry_at <= now)
+            .order_by(WebhookDeliveryLog.next_retry_at)
+            .limit(50)
+        )
+        retry_deliveries = list(retry_result.scalars().all())
+        
+        # Combine and process all deliveries
+        all_deliveries = deliveries + retry_deliveries
+        
+        for delivery in all_deliveries:
             await self._deliver_webhook(delivery)
+    
+    async def deliver_webhook(self, delivery_id: UUID) -> bool:
+        """
+        Public method to deliver a webhook payload.
+        
+        Args:
+            delivery_id: UUID of the delivery log entry
+            
+        Returns:
+            True if delivery succeeded, False otherwise
+            
+        Requirements 8.1-8.7:
+        - Send HTTP POST with JSON body
+        - Include required headers
+        - Handle response codes (2xx = success, 4xx/5xx = failed)
+        """
+        result = await self.db.execute(
+            select(WebhookDeliveryLog).where(WebhookDeliveryLog.id == delivery_id)
+        )
+        delivery = result.scalar_one_or_none()
+        
+        if not delivery:
+            logger.warning(f"Delivery not found: {delivery_id}")
+            return False
+        
+        await self._deliver_webhook(delivery)
+        
+        return delivery.status == "success"
     
     async def _deliver_webhook(self, delivery: WebhookDeliveryLog) -> None:
         """
@@ -269,6 +322,7 @@ class WebhookService:
         
         if not webhook or not webhook.is_active:
             delivery.status = "failed"
+            delivery.response_body = "Webhook not found or inactive"
             await self.db.commit()
             return
         
@@ -298,11 +352,14 @@ class WebhookService:
                 delivery.response_code = response.status_code
                 delivery.response_body = response.text[:1000] if response.text else ""
                 
+                # Requirement 8.6: Success on HTTP 2xx
                 if response.status_code >= 200 and response.status_code < 300:
                     delivery.status = "success"
                     delivery.delivered_at = datetime.utcnow()
+                    delivery.next_retry_at = None
                     logger.info(f"Webhook delivered successfully: {webhook.id}")
                 else:
+                    # Requirement 8.7: Failed on HTTP 4xx/5xx
                     delivery.status = "failed"
                     logger.warning(f"Webhook delivery failed: {webhook.id}, status: {response.status_code}")
         
@@ -318,7 +375,45 @@ class WebhookService:
             delivery.status = "failed"
             logger.error(f"Webhook delivery error: {webhook.id}, error: {e}")
         
+        # Requirement 9.1-9.5: Retry logic with exponential backoff
+        await self._handle_retry(delivery)
+        
         await self.db.commit()
+    
+    async def _handle_retry(self, delivery: WebhookDeliveryLog) -> None:
+        """
+        Handle retry logic with exponential backoff.
+        
+        Requirements 9.1-9.5:
+        - Retry up to 3 times
+        - Exponential backoff: 60 × 2^(n-1) seconds (1min, 2min, 4min)
+        - Schedule retries and record next_retry_at
+        """
+        max_retries = 3
+        
+        if delivery.status == "failed" and delivery.attempts < max_retries:
+            # Requirement 9.2: Exponential backoff: 60 × 2^(n-1) seconds
+            # n is the attempt number (1-indexed), so for attempt 1: 60 × 2^0 = 60s
+            # for attempt 2: 60 × 2^1 = 120s, for attempt 3: 60 × 2^2 = 240s
+            delay_seconds = 60 * (2 ** (delivery.attempts - 1))
+            
+            delivery.next_retry_at = datetime.utcnow()
+            delivery.next_retry_at = delivery.next_retry_at.replace(
+                second=delivery.next_retry_at.second + delay_seconds
+            )
+            delivery.status = "retrying"
+            
+            logger.info(
+                f"Scheduling retry for delivery {delivery.id}, "
+                f"attempt {delivery.attempts}, delay {delay_seconds}s"
+            )
+        elif delivery.status == "failed" and delivery.attempts >= max_retries:
+            # Requirement 9.4: Max retries exceeded, mark permanently failed
+            delivery.status = "failed"
+            delivery.next_retry_at = None
+            logger.warning(
+                f"Delivery {delivery.id} permanently failed after {delivery.attempts} attempts"
+            )
     
     def _generate_signature(self, payload: Dict, secret: str, timestamp: str) -> str:
         """
@@ -338,6 +433,147 @@ class WebhookService:
             message.encode(),
             hashlib.sha256
         ).hexdigest()
+    
+    @staticmethod
+    def calculate_backoff_delay(attempt_number: int) -> int:
+        """
+        Calculate exponential backoff delay for a given attempt number.
+        
+        Args:
+            attempt_number: The attempt number (1-indexed)
+            
+        Returns:
+            Delay in seconds using formula: 60 × 2^(n-1)
+            
+        Examples:
+            attempt_number=1 -> 60 seconds (1 minute)
+            attempt_number=2 -> 120 seconds (2 minutes)
+            attempt_number=3 -> 240 seconds (4 minutes)
+            
+        Validates: Requirement 9.2
+        """
+        if attempt_number < 1:
+            return 60
+        return 60 * (2 ** (attempt_number - 1))
+    
+    async def retry_delivery(self, delivery_id: UUID) -> bool:
+        """
+        Manually retry a failed delivery.
+        
+        Args:
+            delivery_id: UUID of the delivery log entry
+            
+        Returns:
+            True if retry was scheduled, False if delivery not found
+            
+        Requirements 14.1, 14.2:
+        - Reset attempt count to 0
+        - Re-queue the delivery
+        """
+        result = await self.db.execute(
+            select(WebhookDeliveryLog).where(WebhookDeliveryLog.id == delivery_id)
+        )
+        delivery = result.scalar_one_or_none()
+        
+        if not delivery:
+            logger.warning(f"Delivery not found for retry: {delivery_id}")
+            return False
+        
+        # Only allow manual retry for deliveries that have exceeded max retries
+        if delivery.status != "failed" or delivery.attempts < 3:
+            logger.warning(f"Cannot manually retry delivery {delivery_id}: status={delivery.status}, attempts={delivery.attempts}")
+            return False
+        
+        # Reset attempt count and re-queue
+        delivery.attempts = 0
+        delivery.status = "pending"
+        delivery.next_retry_at = None
+        delivery.response_code = None
+        delivery.response_body = None
+        
+        await self.db.commit()
+        
+        logger.info(f"Manual retry scheduled for delivery {delivery_id}")
+        
+        # Trigger async delivery processing
+        asyncio.create_task(self._process_deliveries())
+        
+        return True
+    
+    async def list_deliveries(
+        self,
+        webhook_id: UUID,
+        user_id: int,
+        status: Optional[str] = None,
+        event: Optional[str] = None
+    ) -> List[WebhookDeliveryLog]:
+        """
+        List delivery logs for a webhook.
+        
+        Args:
+            webhook_id: Webhook UUID
+            user_id: User ID for ownership check
+            status: Optional filter by status (pending, success, failed, retrying)
+            event: Optional filter by event type
+            
+        Returns:
+            List of delivery logs
+            
+        Requirements 13.1, 13.2, 13.3:
+        - Return all delivery log entries for a webhook
+        - Allow filtering by status
+        - Allow filtering by event type
+        """
+        # Verify webhook ownership
+        webhook = await self.get_webhook(webhook_id, user_id)
+        if not webhook:
+            return []
+        
+        # Build query
+        query = select(WebhookDeliveryLog).where(
+            WebhookDeliveryLog.webhook_id == webhook_id
+        )
+        
+        if status:
+            query = query.where(WebhookDeliveryLog.status == status)
+        
+        if event:
+            query = query.where(WebhookDeliveryLog.event == event)
+        
+        query = query.order_by(WebhookDeliveryLog.created_at.desc())
+        
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+    
+    async def get_delivery(
+        self,
+        delivery_id: UUID,
+        webhook_id: UUID,
+        user_id: int
+    ) -> Optional[WebhookDeliveryLog]:
+        """
+        Get a specific delivery log.
+        
+        Args:
+            delivery_id: Delivery log UUID
+            webhook_id: Webhook UUID (for ownership verification)
+            user_id: User ID for ownership check
+            
+        Returns:
+            Delivery log if found and owned by user
+        """
+        # Verify webhook ownership
+        webhook = await self.get_webhook(webhook_id, user_id)
+        if not webhook:
+            return None
+        
+        result = await self.db.execute(
+            select(WebhookDeliveryLog).where(
+                WebhookDeliveryLog.id == delivery_id,
+                WebhookDeliveryLog.webhook_id == webhook_id
+            )
+        )
+        return result.scalar_one_or_none()
 
 
 async def get_webhook_service(db: AsyncSession = None) -> WebhookService:

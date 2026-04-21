@@ -568,6 +568,35 @@ async def submit_form(
         print(f"Submitting form to: {data.url}")
         print(f"Raw form data: {data.form_data}")
         
+        # Get user info for webhook events
+        user = None
+        user_id = None
+        auth_header = request.headers.get('Authorization')
+        if auth_header and auth_header.startswith('Bearer '):
+            try:
+                token = auth_header.split(' ')[1]
+                payload = auth.decode_access_token(token)
+                if payload:
+                    email = payload.get("sub")
+                    if email:
+                        user_res = await db.execute(select(models.User).filter(models.User.email == email))
+                        user = user_res.scalars().first()
+                        if user:
+                            user_id = user.id
+            except Exception:
+                pass
+        
+        # Trigger webhook for submission started event
+        try:
+            webhook_service = await get_webhook_service(db)
+            await webhook_service.queue_event("form.submission_started", {
+                "form_url": data.url,
+                "user_id": user_id,
+                "fields_count": len(data.form_data) if data.form_data else 0
+            })
+        except Exception as e:
+            logger.warning(f"Webhook trigger failed: {e}")
+        
         schema = get_schema(data.url, form_data=data.form_schema)
         formatted_data = data.form_data
 
@@ -654,14 +683,29 @@ async def submit_form(
         # Trigger webhook events
         try:
             webhook_service = await get_webhook_service(db)
-            event_type = "form.submitted" if result.get("success") else "form.failed"
-            await webhook_service.queue_event(event_type, {
-                "form_url": data.url,
-                "submission_id": submission.id if 'submission' in dir() else None,
-                "user_id": user.id if 'user' in dir() else None,
-                "fields_count": len(formatted_data) if formatted_data else 0,
-                "success": result.get("success", False)
-            })
+            
+            # Determine event type based on submission result
+            if result.get("success"):
+                event_type = "form.submission_completed"
+                event_data = {
+                    "form_url": data.url,
+                    "submission_id": submission.id if 'submission' in dir() else None,
+                    "user_id": user.id if user else user_id,
+                    "fields_submitted": len(formatted_data) if formatted_data else 0,
+                    "success": True
+                }
+            else:
+                event_type = "form.submission_failed"
+                event_data = {
+                    "form_url": data.url,
+                    "submission_id": submission.id if 'submission' in dir() else None,
+                    "user_id": user.id if user else user_id,
+                    "error_type": "submission_error",
+                    "error_message": result.get("message", "Form submission failed"),
+                    "success": False
+                }
+            
+            await webhook_service.queue_event(event_type, event_data)
         except Exception as e:
             logger.warning(f"Webhook trigger failed: {e}")
 
